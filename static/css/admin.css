@@ -1,0 +1,63 @@
+/* Visitor Insights — admin screen. WordPress admin palette; no framework. */
+
+.fw-vi { --vi-accent: #2271b1; --vi-soft: #c5d9ed; --vi-line: #dcdcde; --vi-muted: #646970; }
+
+.fw-vi-range { display: inline-flex; gap: 2px; margin-left: 12px; vertical-align: middle; background: #f0f0f1; border-radius: 6px; padding: 2px; }
+.fw-vi-range a { padding: 4px 10px; border-radius: 4px; text-decoration: none; color: #1d2327; font-size: 13px; }
+.fw-vi-range a.is-active { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); font-weight: 600; }
+
+.fw-vi-card { background: #fff; border: 1px solid var(--vi-line); border-radius: 8px; padding: 16px 20px; margin: 0 0 20px; }
+.fw-vi-card h2 { margin: 0 0 12px; font-size: 14px; }
+
+.fw-vi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 0 0 20px; }
+.fw-vi-tile { background: #fff; border: 1px solid var(--vi-line); border-radius: 8px; padding: 14px 18px; }
+.fw-vi-tile span { display: block; color: var(--vi-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.fw-vi-tile strong { display: block; font-size: 28px; line-height: 1.2; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+.fw-vi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 20px; }
+
+.fw-vi-bar { position: relative; display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 0 8px; margin: 0 0 4px; border-radius: 4px; overflow: hidden; }
+.fw-vi-bar__fill { position: absolute; inset: 0 auto 0 0; background: var(--vi-soft); opacity: .7; }
+.fw-vi-bar__label { position: relative; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw-vi-bar__n { position: relative; font-variant-numeric: tabular-nums; color: var(--vi-muted); }
+
+.fw-vi-table td, .fw-vi-table th { vertical-align: middle; }
+.fw-vi-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fw-vi-table code { background: none; padding: 0; font-size: 12px; }
+.fw-vi-num { display: inline-block; min-width: 20px; color: var(--vi-muted); }
+
+.fw-vi-chart { width: 100%; height: auto; display: block; }
+.fw-vi-chart__grid { stroke: #f0f0f1; }
+.fw-vi-chart__axis { fill: var(--vi-muted); font-size: 11px; }
+.fw-vi-chart__hit { fill: transparent; }
+.fw-vi-chart__hit:hover { fill: rgba(34, 113, 177, .06); }
+.fw-vi-chart__bar { fill: var(--vi-soft); }
+.fw-vi-chart__bar--u { fill: var(--vi-accent); }
+.fw-vi-chart__legend { margin: 8px 0 0; color: var(--vi-muted); }
+.fw-vi-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--vi-soft); margin: 0 6px 0 0; vertical-align: -1px; }
+.fw-vi-swatch--u { background: var(--vi-accent); margin-left: 14px; }
+
+.fw-vi-empty { background: #fff; border: 1px dashed #c3c4c7; border-radius: 8px; padding: 28px 32px; max-width: 720px; }
+.fw-vi-empty h2 { margin-top: 0; }
+
+.fw-vi-hm__bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; }
+.fw-vi-hm__bar select { max-width: 360px; }
+.fw-vi-seg { display: inline-flex; background: #f0f0f1; border-radius: 6px; padding: 2px; }
+.fw-vi-seg button { border: 0; background: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; color: #1d2327; font-size: 13px; display: inline-flex; gap: 4px; align-items: center; }
+.fw-vi-seg button .dashicons { font-size: 16px; width: 16px; height: 16px; }
+.fw-vi-seg button.is-active { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .12); font-weight: 600; }
+.fw-vi-seg button:focus-visible { outline: 2px solid var(--vi-accent); outline-offset: 1px; }
+.fw-vi-hm__info { margin: 0 0 10px; color: var(--vi-muted); min-height: 1.4em; }
+.fw-vi-hm__stage { position: relative; overflow: hidden; background: #1d2327; border-radius: 8px; margin: 0 0 20px; display: flex; justify-content: center; }
+.fw-vi-hm__stage iframe { border: 0; background: #fff; transform-origin: top center; flex: none; }
+
+.fw-vi-live__count { font-size: 15px; margin: 0 0 14px; }
+.fw-vi-live__count strong { font-size: 40px; margin-right: 6px; vertical-align: -6px; font-variant-numeric: tabular-nums; }
+
+.fw-vi-status ul { margin: 0 0 12px; }
+.fw-vi-status li { display: flex; gap: 6px; align-items: flex-start; }
+.fw-vi-status .dashicons-yes-alt { color: #00a32a; }
+.fw-vi-status .dashicons-info, .fw-vi-status .dashicons-shield { color: var(--vi-muted); }
+
+.fw-vi-danger { margin-top: 32px; padding: 16px 20px; border: 1px solid #f0b8b8; border-radius: 8px; background: #fff; max-width: 820px; }
+.fw-vi-danger h2 { margin-top: 0; color: #b32d2e; }
