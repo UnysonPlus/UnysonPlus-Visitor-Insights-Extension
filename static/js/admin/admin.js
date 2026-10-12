@@ -39,7 +39,11 @@
 		var frame = stage.querySelector('iframe');
 		var info = hm.querySelector('.fw-vi-hm__info');
 		var table = hm.querySelector('.fw-vi-hm__table');
-		var st = { mode: 'clicks', device: 'd', days: 30 };
+		var st = { mode: hm.getAttribute('data-mode') || 'clicks', device: 'd', days: 30 };
+
+		[].forEach.call(hm.querySelectorAll('.fw-vi-seg[data-name="mode"] button'), function (b) {
+			b.classList.toggle('is-active', b.getAttribute('data-value') === st.mode);
+		});
 		var ready = false;
 
 		function layout() {

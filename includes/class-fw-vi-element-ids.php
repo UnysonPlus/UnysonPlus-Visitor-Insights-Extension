@@ -38,6 +38,13 @@ class FW_VI_Element_IDs {
 			$attr['data-fw-item-id'] = (string) $atts['unique_id'];
 		}
 
+		if ( $this->active() && empty( $attr['data-fw-vi-goal'] ) ) {
+			$goal = FW_VI_Goals::element_key( $atts );
+			if ( '' !== $goal ) {
+				$attr['data-fw-vi-goal'] = $goal;
+			}
+		}
+
 		return $attr;
 	}
 
@@ -55,7 +62,9 @@ class FW_VI_Element_IDs {
 			return $output;
 		}
 
-		$stamped = preg_replace( '/<([a-zA-Z][a-zA-Z0-9-]*)/', '<$1 data-fw-item-id="' . esc_attr( $uid ) . '"', $output, 1 );
+		$goal    = FW_VI_Goals::element_key( $attr );
+		$extra   = '' !== $goal ? ' data-fw-vi-goal="' . esc_attr( $goal ) . '"' : '';
+		$stamped = preg_replace( '/<([a-zA-Z][a-zA-Z0-9-]*)/', '<$1 data-fw-item-id="' . esc_attr( $uid ) . '"' . $extra, $output, 1 );
 
 		return is_string( $stamped ) ? $stamped : $output;
 	}

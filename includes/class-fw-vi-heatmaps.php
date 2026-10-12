@@ -112,6 +112,11 @@ class FW_VI_Heatmaps {
 			'scroll'    => __( 'Scroll reach', 'fw' ),
 			'attention' => __( 'Attention', 'fw' ),
 			'elements'  => __( 'Elements', 'fw' ),
+			'frustration' => __( 'Frustration', 'fw' ),
+			'rage'      => __( '%s rage', 'fw' ),
+			'dead'      => __( '%s dead', 'fw' ),
+			'errorc'    => __( '%s error', 'fw' ),
+			'pageLevel' => __( 'Outside any element: %s', 'fw' ),
 			'desktop'   => __( 'Desktop data', 'fw' ),
 			'tablet'    => __( 'Tablet data', 'fw' ),
 			'mobile'    => __( 'Mobile data', 'fw' ),
@@ -171,6 +176,7 @@ class FW_VI_Heatmaps {
 			'grid'     => array(),
 			'scroll'   => array(),
 			'sections' => array(),
+			'friction' => array(),
 		);
 
 		if ( ! $page ) {
@@ -197,6 +203,10 @@ class FW_VI_Heatmaps {
 		}
 
 		$out['sections'] = FW_VI_Sections::for_page( $page, $device, $from, $to );
+
+		foreach ( $wpdb->get_results( $wpdb->prepare( $sql( 'item, kind, SUM(n) n', 'friction', 'item, kind' ), $where ), ARRAY_N ) as $r ) { // phpcs:ignore WordPress.DB
+			$out['friction'][] = array( $r[0], $r[1], (int) $r[2] );
+		}
 
 		return $out;
 	}

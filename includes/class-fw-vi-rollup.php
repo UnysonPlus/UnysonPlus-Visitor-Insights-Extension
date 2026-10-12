@@ -104,9 +104,15 @@ class FW_VI_Rollup {
 		$agg   = array(
 			'views' => array(), 'uniq' => array(), 'sources' => array(), 'elem' => array(),
 			'clicks' => array(), 'scroll' => array(), 'sections' => array(), 'live' => array(),
+			'goals' => array(), 'friction' => array(), 'errors' => array(), 'errmsg' => array(),
+			'notfound' => array(), 'vitals' => array(),
 		);
 		$seen  = array(); // page|day|vid → counted (a view over the daily cap is ignored whole)
 		$lines = 0;
+		$known = FW_VI_Goals::known_keys();
+		$pgoal = FW_VI_Goals::page_goals();
+		$vidvh = array(); // view id → visitor hash, from this run's page views
+		$tps   = array(); // funnel touchpoints: [ts, vh|null, vid, kind p|g, value, day]
 
 		while ( false !== ( $raw = fgets( $fh ) ) ) {
 			$row = json_decode( $raw, true );
@@ -117,10 +123,27 @@ class FW_VI_Rollup {
 
 			list( $ts, $post_id, $path, $dev, $vid, $seq, $vh, $cc, $br, $os, $pv, $events ) = $row;
 
-			$page = self::page_id( (int) $post_id, (string) $path );
-			$day  = wp_date( 'Y-m-d', (int) $ts );
-			$vk   = $page . '|' . $day . '|' . $vid;
+			$day = wp_date( 'Y-m-d', (int) $ts );
 			$lines++;
+
+			// A line WordPress wrote itself: a server-side goal or a 404. Not a view.
+			if ( -1 === (int) $seq ) {
+				foreach ( (array) $events as $e ) {
+					if ( 'g' === $e[0] && isset( $known[ $e[1] ] ) ) {
+						$gp = self::page_id( (int) $post_id, (string) $path );
+						self::add( $agg['goals'], array( $gp, $day, $dev, $e[1] ), array( 1, (int) $e[2] ) );
+						if ( '' !== $vh ) {
+							$tps[] = array( (int) $ts, $vh, '', 'g', $e[1], $day );
+						}
+					} elseif ( 'n' === $e[0] ) {
+						self::add( $agg['notfound'], array( $day, (string) $path, (string) $e[1] ), array( 1 ) );
+					}
+				}
+				continue;
+			}
+
+			$page = self::page_id( (int) $post_id, (string) $path );
+			$vk   = $page . '|' . $day . '|' . $vid;
 
 			if ( 0 === (int) $seq ) {
 				if ( $cap && self::views_so_far( $page, $day, $agg ) >= $cap ) {
@@ -136,6 +159,18 @@ class FW_VI_Rollup {
 				if ( '' !== $vh ) {
 					$agg['uniq'][ $day ][ $page ][ $vh ] = true;
 					$agg['uniq'][ $day ][0][ $vh ]       = true;
+					$vidvh[ $vid ]                       = $vh;
+					$tps[]                               = array( (int) $ts, $vh, $vid, 'p', (string) $path, $day );
+				}
+
+				// Page-visit goals.
+				foreach ( $pgoal as $key => $pattern ) {
+					if ( FW_VI_Goals::path_matches( $pattern, (string) $path ) ) {
+						self::add( $agg['goals'], array( $page, $day, $dev, $key ), array( 1, 0 ) );
+						if ( '' !== $vh ) {
+							$tps[] = array( (int) $ts, $vh, $vid, 'g', $key, $day );
+						}
+					}
 				}
 
 				$dims = array( 'dev' => $dev, 'cc' => $cc, 'br' => $br, 'os' => $os );
@@ -153,7 +188,7 @@ class FW_VI_Rollup {
 				continue; // the rest of a view that was over the cap
 			}
 
-			$agg['live'][ $vid ] = array( $page, $dev, (int) $ts );
+			$agg['live'][ $vid ] = array( $page, $dev, (int) $ts, $vidvh[ $vid ] ?? '' );
 
 			foreach ( (array) $events as $e ) {
 				switch ( $e[0] ) {
@@ -177,6 +212,23 @@ class FW_VI_Rollup {
 						self::add( $agg['views'], array( $page, $day, $dev ), array( 0, 0, $e[1] ) );
 						self::add( $agg['views'], array( 0, $day, $dev ), array( 0, 0, $e[1] ) );
 						break;
+					case 'g':
+						if ( isset( $known[ $e[1] ] ) ) {
+							self::add( $agg['goals'], array( $page, $day, $dev, $e[1] ), array( 1, (int) $e[2] ) );
+							$tps[] = array( (int) $ts, $vidvh[ $vid ] ?? null, $vid, 'g', $e[1], $day );
+						}
+						break;
+					case 'f':
+						self::add( $agg['friction'], array( $page, $day, $dev, $e[2], $e[1] ), array( 1 ) );
+						break;
+					case 'x':
+						$hash = substr( md5( $e[1] . '|' . $e[2] . '|' . $e[3] ), 0, 16 );
+						self::add( $agg['errors'], array( $page, $day, $hash ), array( 1 ) );
+						$agg['errmsg'][ $hash ] = array( $e[1], $e[2], (int) $e[3] );
+						break;
+					case 'v':
+						self::add( $agg['vitals'], array( $page, $day, $dev, $e[1], FW_VI_Vitals::bucket( $e[1], (int) $e[2] ) ), array( 1 ) );
+						break;
 				}
 			}
 		}
@@ -184,6 +236,10 @@ class FW_VI_Rollup {
 		fclose( $fh ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 
 		self::write( $agg );
+
+		if ( $tps ) {
+			FW_VI_Funnels::process( self::resolve_visitors( $tps ) );
+		}
 
 		return $lines;
 	}
@@ -292,17 +348,78 @@ class FW_VI_Rollup {
 		self::upsert( 'clicks', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'cx' => '%d', 'cy' => '%d' ), array( 'n' ), $agg['clicks'] );
 		self::upsert( 'scroll', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'band' => '%d' ), array( 'n' ), $agg['scroll'] );
 		self::upsert( 'sections', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'item' => '%s' ), array( 'reached', 'visible_ms' ), $agg['sections'] );
+		self::upsert( 'goals', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'goal' => '%s' ), array( 'n', 'value' ), $agg['goals'] );
+		self::upsert( 'friction', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'item' => '%s', 'kind' => '%s' ), array( 'n' ), $agg['friction'] );
+		self::upsert( 'errors', array( 'page_id' => '%d', 'day' => '%s', 'hash' => '%s' ), array( 'n' ), $agg['errors'] );
+		self::upsert( 'notfound', array( 'day' => '%s', 'path' => '%s', 'ref' => '%s' ), array( 'n' ), $agg['notfound'] );
+		self::upsert( 'vitals', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'metric' => '%s', 'bucket' => '%d' ), array( 'n' ), $agg['vitals'] );
+
+		if ( $agg['errmsg'] ) {
+			$mtable = FW_VI_Installer::table( 'errmsg' );
+			foreach ( array_chunk( $agg['errmsg'], self::CHUNK, true ) as $chunk ) {
+				$rows = array();
+				foreach ( $chunk as $hash => $m ) {
+					$rows[] = $wpdb->prepare( '(%s,%s,%s,%d)', $hash, $m[0], $m[1], $m[2] );
+				}
+				$wpdb->query( "INSERT IGNORE INTO {$mtable} (hash, message, source, line) VALUES " . implode( ',', $rows ) ); // phpcs:ignore WordPress.DB
+			}
+		}
 
 		if ( $agg['live'] ) {
 			$ltable = FW_VI_Installer::table( 'live' );
 			foreach ( array_chunk( $agg['live'], self::CHUNK, true ) as $chunk ) {
 				$rows = array();
 				foreach ( $chunk as $vid => $v ) {
-					$rows[] = $wpdb->prepare( '(%s,%d,%s,%d)', $vid, $v[0], $v[1], $v[2] );
+					$rows[] = $wpdb->prepare( '(%s,%d,%s,%d,%s)', $vid, $v[0], $v[1], $v[2], $v[3] );
 				}
-				$wpdb->query( "INSERT INTO {$ltable} (vid, page_id, device, seen) VALUES " . implode( ',', $rows ) . ' ON DUPLICATE KEY UPDATE seen = GREATEST(seen, VALUES(seen))' ); // phpcs:ignore WordPress.DB
+				$wpdb->query( "INSERT INTO {$ltable} (vid, page_id, device, seen, vh) VALUES " . implode( ',', $rows ) . " ON DUPLICATE KEY UPDATE seen = GREATEST(seen, VALUES(seen)), vh = IF(VALUES(vh) <> '', VALUES(vh), vh)" ); // phpcs:ignore WordPress.DB
 			}
 		}
+	}
+
+	/**
+	 * Goal events from batches after the first carry only the view id; the
+	 * visitor hash came with that view's first batch, possibly in an earlier
+	 * run, and is kept on its live row for ten minutes.
+	 *
+	 * @param array $tps
+	 *
+	 * @return array touchpoints with a visitor hash, in time order
+	 */
+	private static function resolve_visitors( array $tps ) {
+		global $wpdb;
+
+		$missing = array();
+		foreach ( $tps as $tp ) {
+			if ( null === $tp[1] && '' !== $tp[2] ) {
+				$missing[ $tp[2] ] = true;
+			}
+		}
+
+		$map = array();
+		if ( $missing ) {
+			$in  = implode( ',', array_map( function ( $v ) use ( $wpdb ) {
+				return $wpdb->prepare( '%s', $v );
+			}, array_keys( $missing ) ) );
+			$map = $wpdb->get_results( 'SELECT vid, vh FROM ' . FW_VI_Installer::table( 'live' ) . " WHERE vid IN ({$in}) AND vh <> ''", OBJECT_K ); // phpcs:ignore WordPress.DB
+		}
+
+		$out = array();
+		foreach ( $tps as $tp ) {
+			if ( null === $tp[1] ) {
+				if ( ! isset( $map[ $tp[2] ] ) ) {
+					continue;
+				}
+				$tp[1] = $map[ $tp[2] ]->vh;
+			}
+			$out[] = $tp;
+		}
+
+		usort( $out, function ( $a, $b ) {
+			return $a[0] <=> $b[0];
+		} );
+
+		return $out;
 	}
 
 	/**

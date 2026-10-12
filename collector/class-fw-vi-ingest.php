@@ -23,6 +23,8 @@ if ( ! class_exists( 'FW_VI_Ingest' ) ) :
  *
  * Buffer line: [ts, post_id, path, device, vid, seq, visitor_hash, country,
  *               browser, os, pageview|null, events]
+ * seq -1 marks a line WordPress wrote itself (a server-side goal, a 404);
+ * the collector never accepts a negative seq, so a browser cannot forge one.
  */
 class FW_VI_Ingest {
 
@@ -162,8 +164,11 @@ class FW_VI_Ingest {
 			return array();
 		}
 
-		$out = array();
-		$id  = '/^[A-Za-z0-9_-]{6,32}$/';
+		$out    = array();
+		$id     = '/^[A-Za-z0-9_-]{6,32}$/';
+		$goals  = 0;
+		$errors = 0;
+		$vitals = array();
 
 		foreach ( array_slice( $raw, 0, self::MAX_EVENTS ) as $e ) {
 			if ( ! is_array( $e ) || ! isset( $e[0] ) || ! is_string( $e[0] ) ) {
@@ -211,10 +216,62 @@ class FW_VI_Ingest {
 						$out[] = array( 't', $ms );
 					}
 					break;
+
+				case 'g': // goal completion: [g, key, value?] — keys are checked against the site's goals at rollup
+					$v = isset( $e[2] ) && is_int( $e[2] ) ? $e[2] : 0;
+					if ( isset( $e[1] ) && is_string( $e[1] ) && preg_match( '/^[a-z0-9_-]{1,40}$/', $e[1] ) && $v >= 0 && $v <= 1000000000 && ++$goals <= 20 ) {
+						$out[] = array( 'g', $e[1], $v );
+					}
+					break;
+
+				case 'f': // frustration: [f, r|d|e, item|'']
+					$item = isset( $e[2] ) && is_string( $e[2] ) ? $e[2] : '';
+					if ( isset( $e[1] ) && in_array( $e[1], array( 'r', 'd', 'e' ), true ) && ( '' === $item || preg_match( $id, $item ) ) ) {
+						$out[] = array( 'f', $e[1], $item );
+					}
+					break;
+
+				case 'x': // script error: [x, message, source, line]
+					if ( ++$errors <= 5 && isset( $e[1] ) && is_string( $e[1] ) && '' !== trim( $e[1] ) ) {
+						$out[] = array(
+							'x',
+							self::mask( $e[1], 150 ),
+							isset( $e[2] ) && is_string( $e[2] ) ? self::mask( $e[2], 150 ) : '',
+							isset( $e[3] ) && is_int( $e[3] ) ? max( 0, min( 1000000, $e[3] ) ) : 0,
+						);
+					}
+					break;
+
+				case 'v': // Web Vital: [v, lcp|inp|cls|ttfb, value] (cls × 1000)
+					$v = isset( $e[2] ) && is_int( $e[2] ) ? $e[2] : -1;
+					if ( isset( $e[1] ) && in_array( $e[1], array( 'lcp', 'inp', 'cls', 'ttfb' ), true ) && $v >= 0 && $v <= 600000 && empty( $vitals[ $e[1] ] ) ) {
+						$vitals[ $e[1] ] = true;
+						$out[]           = array( 'v', $e[1], $v );
+					}
+					break;
 			}
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Strip what could identify someone from free text before it is stored:
+	 * email addresses, long digit runs (phone, card, order numbers), query
+	 * strings, control characters.
+	 *
+	 * @param string $text
+	 * @param int    $max
+	 *
+	 * @return string
+	 */
+	public static function mask( $text, $max ) {
+		$text = preg_replace( '/[\x00-\x1f<>"]/', ' ', (string) $text );
+		$text = preg_replace( '/[^\s@]+@[^\s@]+\.[a-z]{2,}/i', '[email]', $text );
+		$text = preg_replace( '/\?[^\s]*/', '', $text );
+		$text = preg_replace( '/\d[\d\s-]{5,}\d/', '#', $text );
+
+		return substr( trim( preg_replace( '/\s+/', ' ', $text ) ), 0, $max );
 	}
 
 	/**
@@ -254,7 +311,7 @@ class FW_VI_Ingest {
 	 *
 	 * @return bool
 	 */
-	private static function append( array $config, $line ) {
+	public static function append( array $config, $line ) {
 		$dir = rtrim( (string) $config['buffer_dir'], '/\\' );
 
 		if ( '' === $dir || ! is_dir( $dir ) ) {

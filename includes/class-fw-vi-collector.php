@@ -223,6 +223,73 @@ class FW_VI_Collector {
 	}
 
 	/**
+	 * Write a line from WordPress itself — a conversion that happens on the
+	 * server (an order, a form submission) or a 404 — into the same buffer the
+	 * collector fills, so the rollup is still the only writer of the tables.
+	 * `seq` -1 marks it; the collector never accepts a negative seq from a
+	 * browser. The same exclusions apply as to page views: bots, excluded
+	 * addresses, editors, Global Privacy Control.
+	 *
+	 * @param array  $events       e.g. [ ['g', 'woo_order', 4599] ]
+	 * @param string $path         where it happened; '' = the referring page on this site
+	 * @param bool   $with_visitor include today's visitor hash (lets funnels follow it)
+	 *
+	 * @return bool
+	 */
+	public static function server_line( array $events, $path = '', $with_visitor = true ) {
+		$s  = FW_VI_Settings::get();
+		$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+
+		if ( ! $s['enabled'] || FW_VI_Bot_Filter::is_bot( $ua )
+			|| ( is_user_logged_in() && current_user_can( 'edit_posts' ) && ! $s['track_editors'] )
+			|| ( $s['honor_gpc'] && isset( $_SERVER['HTTP_SEC_GPC'] ) && '1' === $_SERVER['HTTP_SEC_GPC'] ) ) {
+			return false;
+		}
+
+		$config = self::config();
+		$ip     = FW_VI_Bot_Filter::client_ip( $config['proxies'] );
+
+		if ( '' !== $ip && $config['excluded_ips'] && FW_VI_Bot_Filter::ip_in_list( $ip, $config['excluded_ips'] ) ) {
+			return false;
+		}
+
+		// With "wait for consent everywhere" the server cannot know the answer,
+		// so the conversion is counted but never joined to a visitor.
+		$vh = $with_visitor && 'require' !== $s['consent_mode']
+			? substr( hash( 'sha256', $config['salt'] . '|' . $ip . '|' . $ua . '|' . $config['blog'] ), 0, 16 )
+			: '';
+
+		if ( '' === $path ) {
+			$path = self::referer_path();
+		}
+
+		$dev = preg_match( '/iPad|Tablet|PlayBook|Silk|Kindle|(Android(?!.*Mobile))/i', $ua ) ? 't'
+			: ( preg_match( '/Mobi|iPhone|iPod|Android.*Mobile|Windows Phone|Opera Mini/i', $ua ) ? 'm' : 'd' );
+
+		return FW_VI_Ingest::append( $config, wp_json_encode( array(
+			time(), 0, substr( $path, 0, 191 ), $dev, '', -1, $vh, '', '', '', null, $events,
+		) ) );
+	}
+
+	/**
+	 * The path of the page on this site that sent the current request (the
+	 * form's page for a form post, the checkout for an order), or '/'.
+	 *
+	 * @return string
+	 */
+	public static function referer_path() {
+		$ref = wp_get_raw_referer();
+
+		if ( $ref && in_array( strtolower( (string) wp_parse_url( $ref, PHP_URL_HOST ) ), self::hosts(), true ) ) {
+			$path = (string) wp_parse_url( $ref, PHP_URL_PATH );
+
+			return '' !== $path ? '/' . ltrim( preg_replace( '#/{2,}#', '/', $path ), '/' ) : '/';
+		}
+
+		return '/';
+	}
+
+	/**
 	 * @return array paths of buffer files, oldest first
 	 */
 	public static function buffer_files() {

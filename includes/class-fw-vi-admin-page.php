@@ -5,7 +5,8 @@
 /**
  * Unyson+ → Visitor Insights.
  *
- * Tabs: Overview (traffic), Pages, Heatmaps, Live, Settings. House
+ * Tabs: Overview (traffic), Pages, Heatmaps, Goals, Funnels, Frustration,
+ * Performance, Live, Settings. House
  * conventions as Short Links: a submenu of `fw-extensions` placed through
  * `fw_unysonplus_admin_submenu_order`; actions on `load-{hook}` then a
  * redirect; native `nav-tab-wrapper` tabs; settings rendered by the options
@@ -125,7 +126,7 @@ class FW_VI_Admin_Page {
 			return 'overview';
 		}
 
-		return in_array( $tab, array( 'overview', 'pages', 'heatmaps', 'live', 'settings' ), true ) ? $tab : 'overview';
+		return in_array( $tab, array( 'overview', 'pages', 'heatmaps', 'goals', 'funnels', 'frustration', 'performance', 'live', 'settings' ), true ) ? $tab : 'overview';
 	}
 
 	/**
@@ -188,6 +189,16 @@ class FW_VI_Admin_Page {
 
 		check_admin_referer( self::NONCE );
 
+		// Goals and funnels own their actions; each returns its notice.
+		foreach ( array( 'goals' => array( 'FW_VI_Goals', 'handle' ), 'funnels' => array( 'FW_VI_Funnels', 'handle' ) ) as $tab => $handler ) {
+			$message = call_user_func( $handler, $action );
+
+			if ( null !== $message ) {
+				$this->notice( 'success', esc_html( $message ) );
+				$this->redirect( self::url( $tab, array( 'days' => $this->days() ) ) );
+			}
+		}
+
 		if ( 'save_settings' === $action ) {
 			$before = (array) fw_get_db_ext_settings_option( $this->ext->get_name() );
 			$values = array_merge( $before, fw_get_options_values_from_input( $this->ext->get_settings_options() ) );
@@ -249,6 +260,10 @@ class FW_VI_Admin_Page {
 			'overview' => __( 'Overview', 'fw' ),
 			'pages'    => __( 'Pages', 'fw' ),
 			'heatmaps' => __( 'Heatmaps', 'fw' ),
+			'goals'       => __( 'Goals', 'fw' ),
+			'funnels'     => __( 'Funnels', 'fw' ),
+			'frustration' => __( 'Frustration', 'fw' ),
+			'performance' => __( 'Performance', 'fw' ),
 			'live'     => __( 'Live', 'fw' ),
 		);
 
@@ -258,7 +273,7 @@ class FW_VI_Admin_Page {
 		?>
 		<div class="wrap fw-vi">
 			<h1 class="wp-heading-inline"><?php esc_html_e( 'Visitor Insights', 'fw' ); ?></h1>
-			<?php if ( in_array( $tab, array( 'overview', 'pages' ), true ) ) : ?>
+			<?php if ( in_array( $tab, array( 'overview', 'pages', 'goals', 'funnels', 'frustration', 'performance' ), true ) ) : ?>
 				<?php $this->render_range( $tab ); ?>
 			<?php endif; ?>
 			<hr class="wp-header-end">
@@ -279,6 +294,19 @@ class FW_VI_Admin_Page {
 				case 'heatmaps':
 					$this->render_heatmaps();
 					break;
+				case 'goals':
+					FW_VI_Goals::render( $this->days(), array( $this, 'form_fields' ) );
+					break;
+				case 'funnels':
+					FW_VI_Funnels::render( $this->days(), array( $this, 'form_fields' ) );
+					break;
+				case 'frustration':
+					FW_VI_Errors::render( $this->days() );
+					break;
+				case 'performance':
+					$device = isset( $_GET['device'] ) ? sanitize_key( wp_unslash( $_GET['device'] ) ) : 'm'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					FW_VI_Vitals::render( $this->days(), in_array( $device, array( 'd', 't', 'm' ), true ) ? $device : 'm' );
+					break;
 				case 'live':
 					$this->render_live();
 					break;
@@ -291,6 +319,16 @@ class FW_VI_Admin_Page {
 			?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Nonce and action fields for a form on one of the tabs.
+	 *
+	 * @param string $action
+	 */
+	public function form_fields( $action ) {
+		wp_nonce_field( self::NONCE );
+		printf( '<input type="hidden" name="fw_vi_action" value="%s">', esc_attr( $action ) );
 	}
 
 	private function render_notice() {
@@ -313,7 +351,7 @@ class FW_VI_Admin_Page {
 		foreach ( self::RANGES as $d ) {
 			printf(
 				'<a href="%1$s" class="%2$s">%3$s</a>',
-				esc_url( self::url( $tab, array( 'days' => $d ) ) ),
+				esc_url( self::url( $tab, array_filter( array( 'days' => $d, 'device' => isset( $_GET['device'] ) ? sanitize_key( wp_unslash( $_GET['device'] ) ) : '' ) ) ) ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 				$d === $days ? 'is-active' : '',
 				esc_html( 365 === $d ? __( '12 months', 'fw' ) : sprintf( _n( '%d day', '%d days', $d, 'fw' ), $d ) )
 			);
@@ -346,6 +384,11 @@ class FW_VI_Admin_Page {
 			array( __( 'Avg time on page', 'fw' ), self::duration( $totals['engaged'] ) ),
 			array( __( 'Pages viewed', 'fw' ), number_format_i18n( $totals['pages'] ) ),
 		);
+
+		$conv = array_sum( wp_list_pluck( FW_VI_Goals::totals( $days ), 'n' ) );
+		if ( $conv ) {
+			$tiles[] = array( __( 'Goal completions', 'fw' ), number_format_i18n( $conv ) );
+		}
 		?>
 		<div class="fw-vi-tiles">
 			<?php foreach ( $tiles as $t ) : ?>
@@ -462,7 +505,8 @@ class FW_VI_Admin_Page {
 
 		$path = '/' . ltrim( $path, '/' );
 		?>
-		<div class="fw-vi-hm" data-src="<?php echo esc_url( FW_VI_Heatmaps::view_url( $path, true ) ); ?>">
+		<?php $mode = isset( $_GET['mode'] ) && in_array( $_GET['mode'], array( 'clicks', 'scroll', 'attention', 'elements', 'frustration' ), true ) ? sanitize_key( $_GET['mode'] ) : 'clicks'; // phpcs:ignore WordPress.Security ?>
+		<div class="fw-vi-hm" data-src="<?php echo esc_url( FW_VI_Heatmaps::view_url( $path, true ) ); ?>" data-mode="<?php echo esc_attr( $mode ); ?>">
 			<form class="fw-vi-hm__bar" method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
 				<input type="hidden" name="tab" value="heatmaps">
@@ -484,6 +528,7 @@ class FW_VI_Admin_Page {
 					<button type="button" data-value="scroll"><?php esc_html_e( 'Scroll reach', 'fw' ); ?></button>
 					<button type="button" data-value="attention"><?php esc_html_e( 'Attention', 'fw' ); ?></button>
 					<button type="button" data-value="elements"><?php esc_html_e( 'Elements', 'fw' ); ?></button>
+					<button type="button" data-value="frustration"><?php esc_html_e( 'Frustration', 'fw' ); ?></button>
 				</span>
 
 				<span class="fw-vi-seg" data-name="device" role="group" aria-label="<?php esc_attr_e( 'Device', 'fw' ); ?>">

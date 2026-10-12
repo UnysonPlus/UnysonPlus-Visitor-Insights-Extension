@@ -51,6 +51,41 @@ $options = array(
 			),
 		),
 	),
+	'box_modules'  => array(
+		'type'    => 'box',
+		'title'   => __( 'Modules', 'fw' ),
+		'options' => array(
+			'group_modules' => array(
+				'type'    => 'group',
+				'options' => array(
+					'track_frustration' => array(
+						'type'  => 'switch',
+						'label' => __( 'Frustration clicks', 'fw' ),
+						'desc'  => __( 'Rage clicks (rapid repeated clicks in one spot), dead clicks (nothing on the page responds) and clicks followed by a script error.', 'fw' ),
+						'value' => true,
+					),
+					'track_errors'      => array(
+						'type'  => 'switch',
+						'label' => __( 'Script errors', 'fw' ),
+						'desc'  => __( 'JavaScript errors visitors run into, grouped by message. Numbers and email addresses are masked before anything is sent.', 'fw' ),
+						'value' => true,
+					),
+					'track_404'         => array(
+						'type'  => 'switch',
+						'label' => __( 'Missing pages (404)', 'fw' ),
+						'desc'  => __( 'Addresses that returned "not found", and where the visitor came from.', 'fw' ),
+						'value' => true,
+					),
+					'track_vitals'      => array(
+						'type'  => 'switch',
+						'label' => __( 'Real-visitor performance', 'fw' ),
+						'desc'  => __( 'Core Web Vitals (loading, responsiveness, layout stability) measured in your visitors\' browsers.', 'fw' ),
+						'value' => true,
+					),
+				),
+			),
+		),
+	),
 	'box_privacy'  => array(
 		'type'    => 'box',
 		'title'   => __( 'Privacy and consent', 'fw' ),

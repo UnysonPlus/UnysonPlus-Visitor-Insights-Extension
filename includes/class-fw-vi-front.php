@@ -149,6 +149,22 @@ class FW_VI_Front {
 		wp_enqueue_script( 'fw-vi-core', $this->ext->get_uri( '/static/js/vi-core.js' ), array(), $ver, $args );
 		wp_enqueue_script( 'fw-vi-heatmaps', $this->ext->get_uri( '/static/js/modules/heatmaps.js' ), array( 'fw-vi-core' ), $ver, $args );
 		wp_enqueue_script( 'fw-vi-sections', $this->ext->get_uri( '/static/js/modules/sections.js' ), array( 'fw-vi-core' ), $ver, $args );
+		wp_enqueue_script( 'fw-vi-goals', $this->ext->get_uri( '/static/js/modules/goals.js' ), array( 'fw-vi-core' ), $ver, $args );
+
+		$s    = FW_VI_Settings::get();
+		$mods = array(
+			'frustration' => (bool) $s['track_frustration'],
+			'errors'      => (bool) $s['track_errors'],
+			'vitals'      => (bool) $s['track_vitals'],
+		);
+
+		if ( $mods['frustration'] || $mods['errors'] ) {
+			wp_enqueue_script( 'fw-vi-frustration', $this->ext->get_uri( '/static/js/modules/frustration.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
+
+		if ( $mods['vitals'] ) {
+			wp_enqueue_script( 'fw-vi-vitals', $this->ext->get_uri( '/static/js/modules/vitals.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
 
 		wp_localize_script( 'fw-vi-core', 'UPVI', array(
 			'ep'      => FW_VI_Collector::endpoint(),
@@ -157,6 +173,7 @@ class FW_VI_Front {
 			'k'       => FW_VI_Collector::token( $pid, $path ),
 			'sample'  => (int) FW_VI_Settings::get()['sample_rate'],
 			'consent' => FW_VI_Consent::js_config(),
+			'mods'    => $mods,
 		) );
 	}
 
@@ -167,7 +184,7 @@ class FW_VI_Front {
 	 * @internal
 	 */
 	public function _filter_ao_exclude( $handles ) {
-		return array_merge( (array) $handles, array( 'fw-vi-core', 'fw-vi-heatmaps', 'fw-vi-sections', 'fw-vi-viewer', 'fw-vi-simpleheat' ) );
+		return array_merge( (array) $handles, array( 'fw-vi-core', 'fw-vi-heatmaps', 'fw-vi-sections', 'fw-vi-goals', 'fw-vi-frustration', 'fw-vi-vitals', 'fw-vi-viewer', 'fw-vi-simpleheat' ) );
 	}
 
 	/**

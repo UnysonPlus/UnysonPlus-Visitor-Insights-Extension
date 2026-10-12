@@ -195,6 +195,10 @@
 		onFlush: function (fn) {
 			flushers.push(fn);
 		},
+		/** Send what is buffered now (a goal click that is about to leave the page). */
+		flush: function () {
+			flush();
+		},
 		docHeight: function () {
 			var b = d.body;
 			var e = d.documentElement;
@@ -298,6 +302,13 @@
 		grant: function () {
 			granted = true;
 			start();
+		},
+		/** Count a goal from the site's own script: UnysonPlusVI.goal( 'signup', 0 ). */
+		goal: function (key, value) {
+			if (started && typeof key === 'string' && /^[a-z0-9_-]{1,40}$/.test(key)) {
+				buf.push(['g', key, Math.max(0, Math.round(+value || 0))]);
+				flush();
+			}
 		},
 		revoke: function () {
 			granted = false;

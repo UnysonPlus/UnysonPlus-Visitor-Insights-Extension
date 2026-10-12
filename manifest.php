@@ -14,7 +14,26 @@ $manifest['description'] = __(
 /**
  * Changelog ----------------------------------------------------------------
  *
- * 1.0.0 - First release (Phase 1 of the roadmap). A small tracker starts in
+ * 1.0.1 - Goals, funnels, frustration & errors, real-visitor performance
+ *         (Phase 2). Goals are counted four ways: a "Track as goal" field in
+ *         every element's Advanced tab (the element is stamped
+ *         data-fw-vi-goal), reaching a page (matched by the rollup), a script
+ *         calling UnysonPlusVI.goal(), and automatic server-side conversions
+ *         (form submitted, newsletter sign-up, shop order with its
+ *         value, short-link click) written into the same buffer as seq -1
+ *         lines a browser cannot forge. Only known goal keys are counted.
+ *         Funnels follow today's visitor hash through ordered steps within
+ *         one day; their progress rows are deleted with the salt. The
+ *         frustration module reports rage clicks, dead clicks on things that
+ *         look clickable, clicks followed by a script error, and masked
+ *         script errors; missing pages are recorded server-side with where
+ *         the visitor came from. Core Web Vitals (LCP, INP, CLS, TTFB) are
+ *         measured in the browser and stored as histograms so the 75th
+ *         percentile can be read for any period. New tabs: Goals, Funnels,
+ *         Frustration, Performance; a Frustration heatmap mode; module
+ *         switches in Settings. Schema 1.1.0.
+ *
+ * 1.0.0 -First release (Phase 1 of the roadmap). A small tracker starts in
  *         idle time once consent allows it and batches clicks, scroll reach,
  *         visible time and section reach to a collector that does not boot
  *         WordPress: it validates the batch against a rotating HMAC page token
@@ -33,7 +52,7 @@ $manifest['description'] = __(
  *         a live view, and an admin-bar "Heatmap" toggle on the front end.
  */
 
-$manifest['version']    = '1.0.0';
+$manifest['version']    = '1.0.1';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
 $manifest['thumbnail']  = 'thumbnail.svg';

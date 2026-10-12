@@ -16,7 +16,7 @@
  */
 class FW_VI_Installer {
 
-	const DB_VERSION        = '1.0.0';
+	const DB_VERSION        = '1.1.0';
 	const DB_VERSION_OPTION = 'fw_ext_visitor_insights_db_version';
 
 	const TABLES = array(
@@ -29,6 +29,15 @@ class FW_VI_Installer {
 		'sections' => 'fw_vi_sections',
 		'uniq'     => 'fw_vi_uniq',
 		'live'     => 'fw_vi_live',
+		// 1.1.0 — Phase 2
+		'goals'     => 'fw_vi_goals',
+		'fprogress' => 'fw_vi_funnel_progress',
+		'fdaily'    => 'fw_vi_funnel_daily',
+		'friction'  => 'fw_vi_friction',
+		'errors'    => 'fw_vi_errors',
+		'errmsg'    => 'fw_vi_error_msgs',
+		'notfound'  => 'fw_vi_404',
+		'vitals'    => 'fw_vi_vitals',
 	);
 
 	/**
@@ -157,9 +166,94 @@ class FW_VI_Installer {
 	vid char(16) NOT NULL default '',
 	page_id bigint(20) unsigned NOT NULL default 0,
 	device char(1) NOT NULL default 'd',
+	vh char(16) NOT NULL default '',
 	seen int(10) unsigned NOT NULL default 0,
 	PRIMARY KEY  (vid),
 	KEY seen (seen)
+) {$c};" );
+
+		// --- 1.1.0: goals, funnels, frustration, errors, 404s, Web Vitals ------
+
+		// Goal completions. `value` is in the smallest currency unit (cents) for
+		// goals that carry one (orders); 0 otherwise.
+		dbDelta( "CREATE TABLE {$t['goals']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	device char(1) NOT NULL default 'd',
+	goal varchar(40) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	value bigint(20) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,device,goal),
+	KEY day_goal (day,goal)
+) {$c};" );
+
+		// How far each of today's visitor hashes got through each funnel. Same
+		// life as fw_vi_uniq: deleted with the salt the next day.
+		dbDelta( "CREATE TABLE {$t['fprogress']} (
+	day date NOT NULL default '1970-01-01',
+	funnel varchar(20) NOT NULL default '',
+	vh char(16) NOT NULL default '',
+	step tinyint(3) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,funnel,vh)
+) {$c};" );
+
+		dbDelta( "CREATE TABLE {$t['fdaily']} (
+	day date NOT NULL default '1970-01-01',
+	funnel varchar(20) NOT NULL default '',
+	step tinyint(3) unsigned NOT NULL default 0,
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,funnel,step)
+) {$c};" );
+
+		// kind: r = rage click, d = dead click, e = click followed by a script error.
+		// item '' = outside any builder item.
+		dbDelta( "CREATE TABLE {$t['friction']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	device char(1) NOT NULL default 'd',
+	item varchar(32) NOT NULL default '',
+	kind char(1) NOT NULL default 'r',
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,device,item,kind)
+) {$c};" );
+
+		dbDelta( "CREATE TABLE {$t['errors']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	hash char(16) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,hash),
+	KEY day (day)
+) {$c};" );
+
+		dbDelta( "CREATE TABLE {$t['errmsg']} (
+	hash char(16) NOT NULL default '',
+	message varchar(191) NOT NULL default '',
+	source varchar(191) NOT NULL default '',
+	line int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (hash)
+) {$c};" );
+
+		// ref: the referring host, 'internal' for a link on this site, '' for none.
+		dbDelta( "CREATE TABLE {$t['notfound']} (
+	day date NOT NULL default '1970-01-01',
+	path varchar(191) NOT NULL default '',
+	ref varchar(100) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,path,ref)
+) {$c};" );
+
+		// A histogram per metric, so the 75th percentile can be read back for any
+		// range. metric: lcp / inp / ttfb (bucket = 100 / 25 / 100 ms), cls
+		// (bucket = 0.01). The top bucket holds everything above it.
+		dbDelta( "CREATE TABLE {$t['vitals']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	device char(1) NOT NULL default 'd',
+	metric varchar(4) NOT NULL default '',
+	bucket smallint(5) unsigned NOT NULL default 0,
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,device,metric,bucket)
 ) {$c};" );
 
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, true );

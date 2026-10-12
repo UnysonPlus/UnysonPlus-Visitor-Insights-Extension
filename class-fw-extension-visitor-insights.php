@@ -42,6 +42,11 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		require_once $dir . 'class-fw-vi-reports.php';
 		require_once $dir . 'class-fw-vi-heatmaps.php';
 		require_once $dir . 'class-fw-vi-sections.php';
+		require_once $dir . 'class-fw-vi-goals.php';
+		require_once $dir . 'integrations/class-fw-vi-integrations.php';
+		require_once $dir . 'class-fw-vi-funnels.php';
+		require_once $dir . 'class-fw-vi-errors.php';
+		require_once $dir . 'class-fw-vi-vitals.php';
 
 		FW_VI_Installer::maybe_install();
 
@@ -55,6 +60,9 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		new FW_VI_Front( $this );
 		new FW_VI_Heatmaps( $this );
 		new FW_VI_Sections( $this );
+		new FW_VI_Goals();
+		new FW_VI_Integrations();
+		new FW_VI_Errors();
 
 		if ( is_admin() ) {
 			require_once $dir . 'class-fw-vi-admin-page.php';

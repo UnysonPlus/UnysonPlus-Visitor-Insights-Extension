@@ -180,7 +180,7 @@
 			return;
 		}
 
-		({ clicks: drawClicks, scroll: drawScroll, attention: drawAttention, elements: drawElements }[st.mode] || drawClicks)(W, H);
+		({ clicks: drawClicks, scroll: drawScroll, attention: drawAttention, elements: drawElements, frustration: drawFrustration }[st.mode] || drawClicks)(W, H);
 	}
 
 	function drawClicks(W, H) {
@@ -364,6 +364,55 @@
 		});
 	}
 
+	function drawFrustration(W, H) {
+		bctx.fillStyle = 'rgba(15,23,42,.45)';
+		bctx.fillRect(0, 0, W, H);
+
+		var per = {};
+		var page = 0;
+
+		(data.friction || []).forEach(function (f) {
+			if (!f[0]) {
+				page += f[2];
+				return;
+			}
+			per[f[0]] = per[f[0]] || { r: 0, d: 0, e: 0 };
+			per[f[0]][f[1]] += f[2];
+		});
+
+		Object.keys(per).forEach(function (item) {
+			var node = el(item);
+			if (!shown(node)) {
+				return;
+			}
+			var r = node.getBoundingClientRect();
+			if (r.bottom < 0 || r.top > H) {
+				return;
+			}
+			var c = per[item];
+			var parts = [];
+			if (c.r) {
+				parts.push(fmt(L.rage, c.r));
+			}
+			if (c.d) {
+				parts.push(fmt(L.dead, c.d));
+			}
+			if (c.e) {
+				parts.push(fmt(L.errorc, c.e));
+			}
+
+			bctx.clearRect(r.left, r.top, r.width, r.height);
+			bctx.strokeStyle = '#ef4444';
+			bctx.lineWidth = 2;
+			bctx.strokeRect(r.left + 1, r.top + 1, r.width - 2, r.height - 2);
+			label(parts.join(' · '), Math.min(W - 8, r.right - 4), Math.max(4, r.top + 4), { right: true, bg: 'rgba(185,28,28,.95)' });
+		});
+
+		if (page) {
+			label(fmt(L.pageLevel, page), 12, 12, { bg: 'rgba(185,28,28,.95)' });
+		}
+	}
+
 	/* ------------------------------------------------------------------ chrome */
 
 	var toolbar = null;
@@ -394,7 +443,7 @@
 		toolbar.className = 'upvi-tb';
 		toolbar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483647;display:flex;gap:8px;align-items:center;padding:8px 10px;background:#0f172a;color:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);font:13px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
 
-		toolbar.appendChild(select('mode', [['clicks', L.clicks], ['scroll', L.scroll], ['attention', L.attention], ['elements', L.elements]], st.mode));
+		toolbar.appendChild(select('mode', [['clicks', L.clicks], ['scroll', L.scroll], ['attention', L.attention], ['elements', L.elements], ['frustration', L.frustration]], st.mode));
 		toolbar.appendChild(select('device', [['d', L.desktop], ['t', L.tablet], ['m', L.mobile]], st.device));
 		toolbar.appendChild(select('days', [[7, fmt(L.days, 7)], [30, fmt(L.days, 30)], [90, fmt(L.days, 90)], [365, fmt(L.days, 365)]], st.days));
 
