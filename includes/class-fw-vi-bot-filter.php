@@ -39,6 +39,73 @@ class FW_VI_Bot_Filter {
 	}
 
 	/**
+	 * What kind of automated visitor a user agent is, and its name, for the bot
+	 * report. First match wins; anything the bot pattern catches but this list
+	 * does not name is "other".
+	 *
+	 * @param string $ua
+	 *
+	 * @return array [ kind, name ] — kind: search / ai / seo / social / monitor / tool / other
+	 */
+	public static function classify( $ua ) {
+		$ua = (string) $ua;
+
+		if ( '' === trim( $ua ) ) {
+			return array( 'tool', 'No user agent' );
+		}
+
+		foreach ( array(
+			array( 'ai', 'GPTBot', '~gptbot~i' ),
+			array( 'ai', 'ChatGPT', '~chatgpt|oai-searchbot~i' ),
+			array( 'ai', 'ClaudeBot', '~claudebot|claude-web|anthropic~i' ),
+			array( 'ai', 'Perplexity', '~perplexity~i' ),
+			array( 'ai', 'Common Crawl', '~ccbot~i' ),
+			array( 'ai', 'Bytespider', '~bytespider~i' ),
+			array( 'ai', 'Google-Extended', '~google-extended~i' ),
+			array( 'ai', 'Amazonbot', '~amazonbot~i' ),
+			array( 'ai', 'Meta AI', '~meta-externalagent|facebookbot~i' ),
+			array( 'ai', 'Cohere', '~cohere~i' ),
+			array( 'ai', 'Diffbot', '~diffbot~i' ),
+			array( 'search', 'Googlebot', '~googlebot|google-inspectiontool|storebot-google|adsbot-google|mediapartners~i' ),
+			array( 'search', 'Bingbot', '~bingbot|bingpreview|msnbot~i' ),
+			array( 'search', 'Applebot', '~applebot~i' ),
+			array( 'search', 'DuckDuckBot', '~duckduck~i' ),
+			array( 'search', 'YandexBot', '~yandex~i' ),
+			array( 'search', 'Baiduspider', '~baiduspider~i' ),
+			array( 'search', 'PetalBot', '~petalbot~i' ),
+			array( 'search', 'Yahoo Slurp', '~slurp~i' ),
+			array( 'seo', 'AhrefsBot', '~ahrefs~i' ),
+			array( 'seo', 'SemrushBot', '~semrush~i' ),
+			array( 'seo', 'MJ12bot', '~mj12~i' ),
+			array( 'seo', 'DotBot', '~dotbot|rogerbot~i' ),
+			array( 'seo', 'Screaming Frog', '~screaming frog~i' ),
+			array( 'social', 'Facebook', '~facebookexternalhit|facebookcatalog~i' ),
+			array( 'social', 'X / Twitter', '~twitterbot~i' ),
+			array( 'social', 'LinkedIn', '~linkedinbot~i' ),
+			array( 'social', 'WhatsApp', '~whatsapp~i' ),
+			array( 'social', 'Telegram', '~telegrambot~i' ),
+			array( 'social', 'Discord', '~discordbot~i' ),
+			array( 'social', 'Slack', '~slackbot~i' ),
+			array( 'social', 'Pinterest', '~pinterest~i' ),
+			array( 'monitor', 'UptimeRobot', '~uptimerobot~i' ),
+			array( 'monitor', 'Pingdom', '~pingdom~i' ),
+			array( 'monitor', 'StatusCake', '~statuscake~i' ),
+			array( 'monitor', 'Site24x7', '~site24x7~i' ),
+			array( 'monitor', 'Lighthouse / PageSpeed', '~lighthouse|pagespeed|gtmetrix~i' ),
+			array( 'monitor', 'New Relic / Datadog', '~newrelic|datadog~i' ),
+			array( 'tool', 'Headless browser', '~headlesschrome|phantomjs|puppeteer|playwright|selenium~i' ),
+			array( 'tool', 'WordPress', '~wordpress/~i' ),
+			array( 'tool', 'HTTP library', '~curl/|wget/|python-|aiohttp|httpx|go-http-client|okhttp|java/|libwww|httpclient|axios/|node-fetch|undici|guzzle|scrapy~i' ),
+		) as $b ) {
+			if ( preg_match( $b[2], $ua ) ) {
+				return array( $b[0], $b[1] );
+			}
+		}
+
+		return array( 'other', preg_match( '~([A-Za-z][\w-]*(?:bot|crawler|spider))~i', $ua, $m ) ? substr( $m[1], 0, 40 ) : 'Other' );
+	}
+
+	/**
 	 * Browser and OS families. The raw user agent is never stored.
 	 *
 	 * @param string $ua

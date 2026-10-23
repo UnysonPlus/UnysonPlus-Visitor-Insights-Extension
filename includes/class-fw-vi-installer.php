@@ -16,7 +16,7 @@
  */
 class FW_VI_Installer {
 
-	const DB_VERSION        = '1.6.0';
+	const DB_VERSION        = '1.7.0';
 	const DB_VERSION_OPTION = 'fw_ext_visitor_insights_db_version';
 
 	const TABLES = array(
@@ -52,6 +52,10 @@ class FW_VI_Installer {
 		'chdaily'   => 'fw_vi_chdaily',
 		// 1.6.0 — Phase 7
 		'hmch'      => 'fw_vi_hmch',
+		// 1.7.0 — Phase 9
+		'visits'    => 'fw_vi_visits',
+		'outbound'  => 'fw_vi_outbound',
+		'bots'      => 'fw_vi_bots',
 	);
 
 	/**
@@ -109,7 +113,9 @@ class FW_VI_Installer {
 	KEY day (day)
 ) {$c};" );
 
-		// dim: ref (referrer host), us / um / uc (UTM source / medium / campaign),
+		// dim: ref (referrer host), us / um / uc / ut (UTM source / medium /
+		// campaign / term), kw ("engine-host|search words", when passed),
+		// rp (referring host + page path, when the referring site shares it),
 		// cc (country), br (browser), os, dev.
 		dbDelta( "CREATE TABLE {$t['sources']} (
 	page_id bigint(20) unsigned NOT NULL default 0,
@@ -400,6 +406,59 @@ class FW_VI_Installer {
 	b smallint(5) unsigned NOT NULL default 0,
 	n bigint(20) unsigned NOT NULL default 0,
 	PRIMARY KEY  (page_id,day,device,ch,kind,item,a,b)
+) {$c};" );
+
+		// 1.7.0 — one row per visit (a run of page views by today's visitor
+		// hash with no 30-minute gap), for paths, entry and exit pages. `vh`
+		// is blanked when its day ends, so an old row names nobody; rows are
+		// deleted after the "Keep visit paths" setting. `steps` is JSON:
+		// [ [seconds after start, page_id], [seconds, "o", url, l|d], … ].
+		dbDelta( "CREATE TABLE {$t['visits']} (
+	id bigint(20) unsigned NOT NULL auto_increment,
+	day date NOT NULL default '1970-01-01',
+	vh char(16) NOT NULL default '',
+	started int(10) unsigned NOT NULL default 0,
+	last_seen int(10) unsigned NOT NULL default 0,
+	entry bigint(20) unsigned NOT NULL default 0,
+	exit_page bigint(20) unsigned NOT NULL default 0,
+	pages smallint(5) unsigned NOT NULL default 0,
+	ch varchar(10) NOT NULL default '',
+	ref varchar(120) NOT NULL default '',
+	rp varchar(191) NOT NULL default '',
+	kw varchar(100) NOT NULL default '',
+	cc char(2) NOT NULL default '',
+	region varchar(60) NOT NULL default '',
+	city varchar(60) NOT NULL default '',
+	dev char(1) NOT NULL default 'd',
+	br varchar(20) NOT NULL default '',
+	os varchar(20) NOT NULL default '',
+	ret char(1) NOT NULL default '',
+	steps text NULL,
+	PRIMARY KEY  (id),
+	KEY day (day),
+	KEY vh_last (vh,last_seen),
+	KEY entry (entry)
+) {$c};" );
+
+		// kind: l (link leaving the site) / d (file download).
+		dbDelta( "CREATE TABLE {$t['outbound']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	kind char(1) NOT NULL default 'l',
+	url varchar(191) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,kind,url),
+	KEY day (day)
+) {$c};" );
+
+		// Automated requests that were filtered out. kind: search / ai / seo /
+		// social / monitor / tool / other.
+		dbDelta( "CREATE TABLE {$t['bots']} (
+	day date NOT NULL default '1970-01-01',
+	kind varchar(10) NOT NULL default '',
+	name varchar(40) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,kind,name)
 ) {$c};" );
 
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, true );

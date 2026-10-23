@@ -225,4 +225,28 @@ class FW_VI_Reports {
 
 		return $home['scheme'] . '://' . $home['host'] . $port . $path;
 	}
+
+	/**
+	 * Pages visits started on, with how many left without a second page.
+	 *
+	 * @param int $days
+	 * @param int $limit
+	 *
+	 * @return array
+	 */
+	public static function entry_pages( $days, $limit = 10 ) {
+		return FW_VI_Visits::ends( 'entry', $days, $limit );
+	}
+
+	/**
+	 * Pages visits ended on.
+	 *
+	 * @param int $days
+	 * @param int $limit
+	 *
+	 * @return array
+	 */
+	public static function exit_pages( $days, $limit = 10 ) {
+		return FW_VI_Visits::ends( 'exit_page', $days, $limit );
+	}
 }

@@ -26,6 +26,7 @@ if ( 'POST' !== ( isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( (string) $_S
 
 require __DIR__ . '/class-fw-vi-ingest.php';
 require dirname( __DIR__ ) . '/includes/class-fw-vi-bot-filter.php';
+require dirname( __DIR__ ) . '/includes/class-fw-vi-geo.php';
 
 /**
  * @return string|null the content directory (wp-content), no trailing slash

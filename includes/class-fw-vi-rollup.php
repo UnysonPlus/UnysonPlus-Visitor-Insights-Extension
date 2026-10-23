@@ -107,7 +107,9 @@ class FW_VI_Rollup {
 			'goals' => array(), 'friction' => array(), 'errors' => array(), 'errmsg' => array(),
 			'notfound' => array(), 'vitals' => array(),
 			'forms' => array(), 'labels' => array(), 'fields' => array(), 'fpos' => array(), 'search' => array(), 'moves' => array(), 'chd' => array(), 'hmch' => array(),
+			'outbound' => array(), 'bots' => array(),
 		);
+		$vq    = array(); // visit steps: [ts, vh|null, vid, p|o, day, data]
 		$seen  = array(); // page|day|vid → counted (a view over the daily cap is ignored whole)
 		$lines = 0;
 		$known = FW_VI_Goals::known_keys();
@@ -141,6 +143,8 @@ class FW_VI_Rollup {
 						}
 					} elseif ( 'n' === $e[0] ) {
 						self::add( $agg['notfound'], array( $day, (string) $path, (string) $e[1] ), array( 1 ) );
+					} elseif ( 'b' === $e[0] ) {
+						self::add( $agg['bots'], array( $day, substr( (string) $e[1], 0, 10 ), substr( (string) $e[2], 0, 40 ) ), array( 1 ) );
 					} elseif ( 'q' === $e[0] && '' !== (string) $e[1] ) {
 						self::add( $agg['search'], array( $day, (string) $e[1] ), array( 1, 0 === (int) $e[2] ? 1 : 0 ) );
 					}
@@ -182,11 +186,15 @@ class FW_VI_Rollup {
 				$dims = array( 'dev' => $dev, 'cc' => $cc, 'br' => $br, 'os' => $os );
 
 				if ( is_array( $pv ) ) {
-					$dims += array( 'ref' => $pv[0] ?? '', 'us' => $pv[1] ?? '', 'um' => $pv[2] ?? '', 'uc' => $pv[3] ?? '' );
+					$dims += array( 'ref' => $pv[0] ?? '', 'us' => $pv[1] ?? '', 'um' => $pv[2] ?? '', 'uc' => $pv[3] ?? '', 'kw' => ! empty( $pv[4] ) ? $pv[0] . '|' . $pv[4] : '', 'ut' => $pv[5] ?? '', 'rp' => ! empty( $pv[6] ) && '/' === $pv[6][0] ? $pv[0] . $pv[6] : '', 'rt' => $pv[7] ?? '', 'ci' => ! empty( $pv[8] ) ? $cc . '|' . $pv[8] : '' );
 				}
 
 				$dims['ch']    = FW_VI_Channels::classify( $pv[0] ?? '', $pv[1] ?? '', $pv[2] ?? '' );
 				$vidch[ $vid ] = $dims['ch'];
+
+				if ( '' !== $vh ) {
+					$vq[] = array( (int) $ts, $vh, $vid, 'p', $day, array( 'page' => $page, 'dims' => $dims, 'kw' => ! empty( $pv[4] ) ? $pv[4] : ( $pv[5] ?? '' ), 'city' => $pv[8] ?? '' ) );
+				}
 				self::add( $agg['chd'], array( $page, $day, $dims['ch'] ), array( 1, 0, 0, 0 ) );
 				$hq[] = array( $vid, $page, $day, $dev, 'v', '', 0, 0, 1 );
 				self::add( $agg['chd'], array( 0, $day, $dims['ch'] ), array( 1, 0, 0, 0 ) );
@@ -273,6 +281,10 @@ class FW_VI_Rollup {
 					case 'e':
 						$tps[] = array( (int) $ts, $vidvh[ $vid ] ?? null, $vid, 'e', $e[1] . '|' . $e[2], $day );
 						break;
+					case 'o':
+						self::add( $agg['outbound'], array( $page, $day, $e[1], $e[2] ), array( 1 ) );
+						$vq[] = array( (int) $ts, $vidvh[ $vid ] ?? null, $vid, 'o', $day, array( 'kind' => $e[1], 'url' => $e[2] ) );
+						break;
 					case 'v':
 						self::add( $agg['vitals'], array( $page, $day, $dev, $e[1], FW_VI_Vitals::bucket( $e[1], (int) $e[2] ) ), array( 1 ) );
 						break;
@@ -284,6 +296,10 @@ class FW_VI_Rollup {
 
 		self::credit_channels( $agg, $chq, $vidch, $hq );
 		self::write( $agg );
+
+		if ( $vq ) {
+			FW_VI_Visits::process( self::resolve_visitors( $vq ) );
+		}
 
 		if ( $tps ) {
 			$tps = self::resolve_visitors( $tps );
@@ -411,6 +427,8 @@ class FW_VI_Rollup {
 		self::upsert( 'search', array( 'day' => '%s', 'term' => '%s' ), array( 'n', 'zero' ), $agg['search'] );
 		self::upsert( 'hmch', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'ch' => '%s', 'kind' => '%s', 'item' => '%s', 'a' => '%d', 'b' => '%d' ), array( 'n' ), $agg['hmch'] );
 		self::upsert( 'chdaily', array( 'page_id' => '%d', 'day' => '%s', 'ch' => '%s' ), array( 'views', 'engaged_ms', 'half', 'goals' ), $agg['chd'] );
+		self::upsert( 'outbound', array( 'page_id' => '%d', 'day' => '%s', 'kind' => '%s', 'url' => '%s' ), array( 'n' ), $agg['outbound'] );
+		self::upsert( 'bots', array( 'day' => '%s', 'kind' => '%s', 'name' => '%s' ), array( 'n' ), $agg['bots'] );
 		self::upsert( 'moves', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'item' => '%s', 'a' => '%d', 'b' => '%d' ), array( 'n' ), $agg['moves'] );
 		self::write_forms( $agg );
 

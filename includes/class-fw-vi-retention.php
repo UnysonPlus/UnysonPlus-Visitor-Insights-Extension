@@ -33,11 +33,16 @@ class FW_VI_Retention {
 		$days   = max( 30, (int) FW_VI_Settings::get()['retention_days'] );
 		$cutoff = wp_date( 'Y-m-d', time() - $days * DAY_IN_SECONDS );
 
-		foreach ( array( 'views', 'sources', 'elem', 'clicks', 'scroll', 'sections', 'goals', 'fdaily', 'friction', 'errors', 'notfound', 'vitals', 'forms', 'fields', 'search', 'xdaily', 'moves', 'chdaily', 'hmch' ) as $which ) {
+		foreach ( array( 'views', 'sources', 'elem', 'clicks', 'scroll', 'sections', 'goals', 'fdaily', 'friction', 'errors', 'notfound', 'vitals', 'forms', 'fields', 'search', 'xdaily', 'moves', 'chdaily', 'hmch', 'outbound', 'bots' ) as $which ) {
 			self::delete_where( FW_VI_Installer::table( $which ), 'day < %s', $cutoff );
 		}
 
 		self::delete_where( FW_VI_Installer::table( 'uniq' ), 'day < %s', wp_date( 'Y-m-d' ) );
+
+		// Visit paths: the day's visitor hash goes with the day; the rows go
+		// after the shorter "Keep visit paths" period.
+		$wpdb->query( $wpdb->prepare( 'UPDATE ' . FW_VI_Installer::table( 'visits' ) . " SET vh = '' WHERE vh <> '' AND day < %s", wp_date( 'Y-m-d' ) ) ); // phpcs:ignore WordPress.DB
+		self::delete_where( FW_VI_Installer::table( 'visits' ), 'day < %s', wp_date( 'Y-m-d', time() - max( 1, (int) FW_VI_Settings::get()['visits_days'] ) * DAY_IN_SECONDS ) );
 		self::delete_where( FW_VI_Installer::table( 'fprogress' ), 'day < %s', wp_date( 'Y-m-d' ) );
 		self::delete_where( FW_VI_Installer::table( 'xassign' ), 'day < %s', wp_date( 'Y-m-d' ) );
 

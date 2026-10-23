@@ -30,6 +30,11 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		require_once $dir . 'class-fw-vi-settings.php';
 		require_once $dir . 'class-fw-vi-installer.php';
 		require_once $dir . 'class-fw-vi-bot-filter.php';
+		require_once $dir . 'class-fw-vi-geo.php';
+		require_once $dir . 'class-fw-vi-geo-admin.php';
+		require_once $dir . 'class-fw-vi-visits.php';
+		require_once $dir . 'class-fw-vi-outbound.php';
+		require_once $dir . 'class-fw-vi-bots.php';
 		require_once dirname( __FILE__ ) . '/collector/class-fw-vi-ingest.php';
 		require_once $dir . 'class-fw-vi-collector.php';
 		require_once $dir . 'class-fw-vi-rollup.php';
@@ -82,11 +87,14 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		new FW_VI_AI();
 		new FW_VI_Recordings( $this );
 		new FW_VI_Alerts();
+		new FW_VI_Bots();
 
 		if ( is_admin() ) {
 			require_once $dir . 'class-fw-vi-admin-page.php';
 			require_once $dir . 'class-fw-vi-app.php';
 			require_once $dir . 'class-fw-vi-transfer.php';
+			require_once $dir . 'class-fw-vi-keywords.php';
+			require_once $dir . 'class-fw-vi-referrers.php';
 
 			new FW_VI_Dashboard();
 			new FW_VI_Export();

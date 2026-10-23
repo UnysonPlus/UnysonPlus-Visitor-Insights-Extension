@@ -139,6 +139,9 @@ class FW_VI_Collector {
 			'buffer_key'   => self::buffer_key(),
 			'cap_bytes'    => self::CAP_BYTES,
 			'blog'         => get_current_blog_id(),
+			'bots'         => (bool) $s['track_bots'],
+			'city'         => (bool) $s['track_city'],
+			'geo_db'       => FW_VI_Geo_Admin::file(),
 		);
 	}
 

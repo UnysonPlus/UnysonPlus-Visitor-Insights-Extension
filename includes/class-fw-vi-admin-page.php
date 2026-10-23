@@ -203,6 +203,12 @@ class FW_VI_Admin_Page {
 			}
 		}
 
+		$result = FW_VI_Geo_Admin::handle( $action );
+		if ( null !== $result ) {
+			$this->notice( $result[0], esc_html( $result[1] ) );
+			$this->redirect( self::url( 'settings' ) );
+		}
+
 		$result = FW_VI_Transfer::handle( $action );
 		if ( null !== $result ) {
 			$this->notice( $result[0], esc_html( $result[1] ) );
@@ -285,7 +291,7 @@ class FW_VI_Admin_Page {
 		$tab = $this->tab();
 
 		ob_start();
-		if ( in_array( $tab, array( 'overview', 'pages', 'goals', 'funnels', 'forms', 'search', 'frustration', 'performance' ), true ) ) {
+		if ( in_array( $tab, array( 'overview', 'keywords', 'referrers', 'paths', 'outbound', 'bots', 'pages', 'goals', 'funnels', 'forms', 'search', 'frustration', 'performance' ), true ) ) {
 			$this->render_range( $tab );
 		}
 
@@ -301,6 +307,16 @@ class FW_VI_Admin_Page {
 			switch ( $tab ) {
 				case 'pages':
 					$this->render_pages();
+					FW_VI_Visits::render_ends( $this->days() );
+					break;
+				case 'paths':
+					FW_VI_Visits::render( $this->days() );
+					break;
+				case 'outbound':
+					FW_VI_Outbound::render( $this->days() );
+					break;
+				case 'bots':
+					FW_VI_Bots::render( $this->days() );
 					break;
 				case 'heatmaps':
 					$this->render_heatmaps();
@@ -335,6 +351,12 @@ class FW_VI_Admin_Page {
 					break;
 				case 'settings':
 					$this->render_settings();
+					break;
+				case 'keywords':
+					FW_VI_Keywords::render( $this->days(), isset( $_GET['path'] ) ? sanitize_text_field( wp_unslash( $_GET['path'] ) ) : '' ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					break;
+				case 'referrers':
+					FW_VI_Referrers::render( $this->days() );
 					break;
 				case 'transfer':
 					FW_VI_Transfer::render( array( $this, 'form_fields' ) );
@@ -449,6 +471,8 @@ class FW_VI_Admin_Page {
 				'br'  => __( 'Browsers', 'fw' ),
 				'os'  => __( 'Operating systems', 'fw' ),
 				'cc'  => __( 'Countries', 'fw' ),
+				'ci'  => __( 'Cities', 'fw' ),
+				'rt'  => __( 'New and returning', 'fw' ),
 				'um'  => __( 'Campaign mediums', 'fw' ),
 			);
 			$names  = array( 'd' => __( 'Desktop', 'fw' ), 't' => __( 'Tablet', 'fw' ), 'm' => __( 'Mobile', 'fw' ) );
@@ -456,7 +480,7 @@ class FW_VI_Admin_Page {
 			foreach ( $labels as $dim => $label ) {
 				$rows = FW_VI_Reports::breakdown( $dim, $days, 8 );
 
-				if ( ! $rows && in_array( $dim, array( 'ch', 'us', 'uc', 'um', 'cc' ), true ) ) {
+				if ( ! $rows && in_array( $dim, array( 'ch', 'us', 'uc', 'um', 'cc', 'ci', 'rt' ), true ) ) {
 					continue;
 				}
 
@@ -470,6 +494,11 @@ class FW_VI_Admin_Page {
 				foreach ( $rows as $val => $n ) {
 					$name = 'dev' === $dim && isset( $names[ $val ] ) ? $names[ $val ] : $val;
 					$name = 'ch' === $dim ? ( FW_VI_Channels::labels()[ $val ] ?? $val ) : $name;
+					$name = 'rt' === $dim ? ( 'r' === $val ? __( 'Returning', 'fw' ) : __( 'New', 'fw' ) ) : $name;
+					if ( 'ci' === $dim ) {
+						$ci   = explode( '|', (string) $val );
+						$name = implode( ', ', array_filter( array( $ci[2] ?? '', $ci[1] ?? '', $ci[0] ?? '' ) ) );
+					}
 					printf(
 						'<div class="fw-vi-bar"><span class="fw-vi-bar__fill" style="width:%1$s%%"></span><span class="fw-vi-bar__label">%2$s</span><span class="fw-vi-bar__n">%3$s</span></div>',
 						esc_attr( round( 100 * $n / $sum, 1 ) ),
@@ -708,6 +737,8 @@ class FW_VI_Admin_Page {
 			<?php echo fw()->backend->render_options( $schema, $values ); // phpcs:ignore WordPress.Security.EscapeOutput ?>
 			<p class="submit"><button type="submit" class="button button-primary"><?php esc_html_e( 'Save Changes', 'fw' ); ?></button></p>
 		</form>
+
+		<?php FW_VI_Geo_Admin::render( array( $this, 'form_fields' ) ); ?>
 
 		<div class="fw-vi-danger">
 			<h2><?php esc_html_e( 'Remove all data', 'fw' ); ?></h2>

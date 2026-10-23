@@ -90,6 +90,11 @@ class FW_VI_Ingest {
 		$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
 
 		if ( FW_VI_Bot_Filter::is_bot( $ua ) ) {
+			// Counted for the bot report, never as a visit.
+			if ( ! empty( $config['bots'] ) ) {
+				$bot = FW_VI_Bot_Filter::classify( $ua );
+				self::append( $config, json_encode( array( time(), 0, '', 'd', '', -1, '', '', '', '', null, array( array( 'b', $bot[0], $bot[1] ) ) ) ) );
+			}
 			return 204;
 		}
 
@@ -112,6 +117,12 @@ class FW_VI_Ingest {
 			$vh  = substr( hash( 'sha256', $config['salt'] . '|' . $ip . '|' . $ua . '|' . $config['blog'] ), 0, 16 );
 			$cc  = FW_VI_Bot_Filter::country();
 			$fam = FW_VI_Bot_Filter::families( $ua );
+
+			if ( ! empty( $config['city'] ) && class_exists( 'FW_VI_Geo' ) ) {
+				$geo   = FW_VI_Geo::locate( $ip, (string) ( $config['geo_db'] ?? '' ) );
+				$cc    = '' !== $cc ? $cc : $geo['cc'];
+				$pv[8] = '' !== $geo['city'] ? $geo['region'] . '|' . $geo['city'] : '';
+			}
 		} elseif ( ! $events ) {
 			return 204;
 		}
@@ -171,6 +182,7 @@ class FW_VI_Ingest {
 		$vitals = array();
 		$forms  = 0;
 		$moves  = 0;
+		$outbound = 0;
 
 		foreach ( array_slice( $raw, 0, self::MAX_EVENTS ) as $e ) {
 			if ( ! is_array( $e ) || ! isset( $e[0] ) || ! is_string( $e[0] ) ) {
@@ -285,6 +297,13 @@ class FW_VI_Ingest {
 					}
 					break;
 
+				case 'o': // left by a link or a download: [o, l|d, url]
+					$url = isset( $e[2] ) && is_string( $e[2] ) ? preg_replace( '/[?#].*$/', '', $e[2] ) : '';
+					if ( ++$outbound <= 10 && isset( $e[1] ) && in_array( $e[1], array( 'l', 'd' ), true ) && preg_match( '~^https?://[^\s<>"]+$~i', $url ) ) {
+						$out[] = array( 'o', $e[1], substr( $url, 0, 190 ) );
+					}
+					break;
+
 				case 'v': // Web Vital: [v, lcp|inp|cls|ttfb, value] (cls × 1000)
 					$v = isset( $e[2] ) && is_int( $e[2] ) ? $e[2] : -1;
 					if ( isset( $e[1] ) && in_array( $e[1], array( 'lcp', 'inp', 'cls', 'ttfb' ), true ) && $v >= 0 && $v <= 600000 && empty( $vitals[ $e[1] ] ) ) {
@@ -318,12 +337,19 @@ class FW_VI_Ingest {
 	}
 
 	/**
-	 * Referrer host (external only) and the three common UTM values.
+	 * Referrer host (external only), the three common UTM values, the search
+	 * words a referring search engine passed (if any) and utm_term — both
+	 * masked like site-search terms.
 	 *
 	 * @param mixed $raw
 	 * @param array $config
 	 *
-	 * @return array [ref, us, um, uc]
+	 * The referring page's path, when the browser sent it, rides along too.
+	 *
+	 * So does "n" / "r" (new / returning), sent only under statistics consent.
+	 * The collector adds "Region|City" at index 8 when it can tell.
+	 *
+	 * @return array [ref, us, um, uc, kw, ut, rp, rt]
 	 */
 	private static function pageview( $raw, array $config ) {
 		$raw = is_array( $raw ) ? $raw : array();
@@ -342,7 +368,10 @@ class FW_VI_Ingest {
 			$ref = '';
 		}
 
-		return array( $ref, strtolower( $s( 'us', 80 ) ), strtolower( $s( 'um', 80 ) ), $s( 'uc', 120 ) );
+		$rt = in_array( $s( 'rt', 1 ), array( 'n', 'r' ), true ) ? $s( 'rt', 1 ) : '';
+		$kw = '' !== $ref ? strtolower( self::mask( $s( 'k', 100 ), 80 ) ) : '';
+
+		return array( $ref, strtolower( $s( 'us', 80 ) ), strtolower( $s( 'um', 80 ) ), $s( 'uc', 120 ), $kw, strtolower( self::mask( $s( 'ut', 100 ), 80 ) ), '' !== $ref ? preg_replace( '/[^\/@]+@[^\/@]+/', '[email]', str_replace( ' ', '%20', $s( 'rp', 140 ) ) ) : '', $rt );
 	}
 
 	/**

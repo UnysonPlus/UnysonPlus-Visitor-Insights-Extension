@@ -232,21 +232,79 @@
 		}
 	};
 
+	var statsGranted = false;
+
+	/** Statistics consent (not the anonymous kind): needed to keep a note on the device. */
+	function statsOk() {
+		if (typeof w.wp_has_consent === 'function' && w.wp_consent_type) {
+			return !!w.wp_has_consent('statistics');
+		}
+		return statsGranted;
+	}
+
+	/**
+	 * New or returning: a visit starts once per tab session; under statistics
+	 * consent the time of the last visit is kept in localStorage, and a start
+	 * more than 30 minutes after it is a return. Without consent nothing is
+	 * kept, and the note is removed when a consent plugin says no.
+	 */
+	function returning() {
+		try {
+			if (!C.mods || !C.mods.returning) {
+				return '';
+			}
+			if (!statsOk()) {
+				if (typeof w.wp_has_consent === 'function' && w.wp_consent_type) {
+					w.localStorage.removeItem('upvi_r');
+				}
+				return '';
+			}
+			var s = w.sessionStorage.getItem('upvi_rs');
+			if (!s) {
+				var last = parseInt(w.localStorage.getItem('upvi_r'), 10) || 0;
+				s = last && now() - last > 1800000 ? 'r' : 'n';
+				w.sessionStorage.setItem('upvi_rs', s);
+			}
+			w.localStorage.setItem('upvi_r', String(now())); // last activity
+			return s;
+		} catch (e) {
+			return '';
+		}
+	}
+
 	function pageview() {
 		var pv = {};
+		var rt = returning();
+
+		if (rt) {
+			pv.rt = rt;
+		}
 
 		try {
 			if (d.referrer) {
-				var h = new URL(d.referrer).hostname;
+				var ru = new URL(d.referrer), h = ru.hostname;
 				if (h && h !== w.location.hostname) {
 					pv.r = h;
+					// The page itself, when the referring site shares it (many send
+					// only their domain). Never its query string.
+					if (ru.pathname && ru.pathname !== '/') {
+						pv.rp = ru.pathname.slice(0, 150);
+					}
+					// The few search engines that still pass the search words.
+					var kp = ['q', 'query', 'p', 'text', 'wd', 'k', 'keyword', 'search_query', 'searchfor'];
+					for (var i = 0; i < kp.length; i++) {
+						if (ru.searchParams.get(kp[i])) {
+							pv.k = ru.searchParams.get(kp[i]).slice(0, 100);
+							break;
+						}
+					}
 				}
 			}
 		} catch (e) {}
 
 		try {
 			var q = new URLSearchParams(w.location.search);
-			var map = { utm_source: 'us', utm_medium: 'um', utm_campaign: 'uc' };
+			var map = { utm_source: 'us', utm_medium: 'um', utm_campaign: 'uc', utm_term: 'ut' };
 
 			for (var k in map) {
 				if (q.get(k)) {
@@ -323,6 +381,10 @@
 		grant: function () {
 			granted = true;
 			start();
+		},
+		/** Statistics consent from the site's own banner (enables new / returning). */
+		grantStatistics: function () {
+			statsGranted = true;
 		},
 		/** Count a goal from the site's own script: UnysonPlusVI.goal( 'signup', 0 ). */
 		goal: function (key, value) {

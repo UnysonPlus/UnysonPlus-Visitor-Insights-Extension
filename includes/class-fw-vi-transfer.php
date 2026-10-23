@@ -39,10 +39,12 @@ class FW_VI_Transfer {
 		'pages', 'views', 'sources', 'elem', 'clicks', 'scroll', 'sections',
 		'goals', 'fdaily', 'friction', 'errors', 'errmsg', 'notfound', 'vitals',
 		'forms', 'fields', 'search', 'xdaily', 'moves', 'chdaily', 'hmch',
+		'outbound', 'bots',
 	);
 
 	/** Tables without a `day` column: exported whole whatever the period. */
 	const UNDATED = array( 'pages', 'errmsg' );
+	// (Visit paths stay behind, like recordings: a log of individual visits.)
 
 	public function __construct() {
 		add_action( 'admin_post_' . self::ACTION, array( $this, '_action_export' ) );

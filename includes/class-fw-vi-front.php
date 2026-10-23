@@ -179,6 +179,8 @@ class FW_VI_Front {
 			'vitals'      => (bool) $s['track_vitals'],
 			'forms'       => (bool) $s['track_forms'],
 			'moves'       => (bool) $s['track_moves'],
+			'outbound'    => (bool) $s['track_outbound'],
+			'returning'   => (bool) $s['track_returning'],
 		);
 
 		if ( $mods['frustration'] || $mods['errors'] ) {
@@ -195,6 +197,10 @@ class FW_VI_Front {
 
 		if ( FW_VI_Experiments::here() ) {
 			wp_enqueue_script( 'fw-vi-experiments', $this->ext->get_uri( '/static/js/modules/experiments.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
+
+		if ( $mods['outbound'] ) {
+			wp_enqueue_script( 'fw-vi-outbound', $this->ext->get_uri( '/static/js/modules/outbound.js' ), array( 'fw-vi-core' ), $ver, $args );
 		}
 
 		if ( $mods['vitals'] ) {

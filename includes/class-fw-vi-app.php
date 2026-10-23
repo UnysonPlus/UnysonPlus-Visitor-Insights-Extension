@@ -60,6 +60,14 @@ class FW_VI_App {
 					'live'     => array( 'label' => __( 'Live', 'fw' ), 'icon' => 'dashicons-visibility' ),
 				),
 			),
+			'found'      => array(
+				'label' => __( 'How they found you', 'fw' ),
+				'items' => array(
+					'keywords'  => array( 'label' => __( 'Keywords', 'fw' ), 'icon' => 'dashicons-tag' ),
+					'referrers' => array( 'label' => __( 'Referring pages', 'fw' ), 'icon' => 'dashicons-admin-links' ),
+					'paths'     => array( 'label' => __( 'Visitor paths', 'fw' ), 'icon' => 'dashicons-randomize' ),
+				),
+			),
 			'behaviour'  => array(
 				'label' => __( 'Behaviour', 'fw' ),
 				'items' => array(
@@ -67,7 +75,8 @@ class FW_VI_App {
 					'heatmaps'   => array( 'label' => __( 'Heatmaps', 'fw' ), 'icon' => 'dashicons-location' ),
 					'recordings' => array( 'label' => __( 'Recordings', 'fw' ), 'icon' => 'dashicons-video-alt3' ),
 					'forms'      => array( 'label' => __( 'Forms', 'fw' ), 'icon' => 'dashicons-feedback' ),
-					'search'     => array( 'label' => __( 'Search', 'fw' ), 'icon' => 'dashicons-search' ),
+					'search'     => array( 'label' => __( 'Site search', 'fw' ), 'icon' => 'dashicons-search' ),
+					'outbound'   => array( 'label' => __( 'Exit links & downloads', 'fw' ), 'icon' => 'dashicons-external' ),
 				),
 			),
 			'conversion' => array(
@@ -83,6 +92,7 @@ class FW_VI_App {
 				'items' => array(
 					'frustration' => array( 'label' => __( 'Frustration', 'fw' ), 'icon' => 'dashicons-warning' ),
 					'performance' => array( 'label' => __( 'Performance', 'fw' ), 'icon' => 'dashicons-performance' ),
+					'bots'        => array( 'label' => __( 'Bots', 'fw' ), 'icon' => 'dashicons-shield' ),
 				),
 			),
 			'setup'      => array(

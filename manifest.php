@@ -14,6 +14,33 @@ $manifest['description'] = __(
 /**
  * Changelog ----------------------------------------------------------------
  *
+ * 1.0.10 - How visitors found you, completed (Phase 9). Visitor paths: page
+ *          views joined into visits (today's visitor hash, 30-minute gap) in
+ *          fw_vi_visits, listed with where each came from, region and city,
+ *          device, new or returning, and every page in order down to the exit
+ *          link or download; the hash is blanked when its day ends and rows go
+ *          after "Keep visit paths" (7-90 days). Entry and exit pages, with
+ *          bounce rates, on the Pages view. Exit links and downloads
+ *          (modules/outbound.js, fw_vi_outbound). New and returning visitors,
+ *          measured only under statistics consent (UnysonPlusVI.grantStatistics()
+ *          for a site's own banner). Regions and cities from CDN headers or a
+ *          city database on the site, read by a built-in MaxMind-format reader;
+ *          the free DB-IP city database downloads from Settings. A bot report:
+ *          crawlers counted when WordPress serves them and when the collector
+ *          refuses a batch, by kind and name, against human page views.
+ *          Schema 1.7.0.
+ *
+ * 1.0.9 - How visitors found you (Phase 9, first part). Keywords: the search
+ *         terms per landing page, gathered from where they still exist and
+ *         labelled by source: Search Console (queries, clicks, impressions,
+ *         position, through the SEO extension's connection, cached 12 hours),
+ *         search words a referring engine still passes (sources dim kw, masked)
+ *         and utm_term (dim ut). Referring pages: the exact page a visitor
+ *         clicked from when the referring site shares it (dim rp, host + path,
+ *         never the query string), grouped under its site with the landing
+ *         page; the rest of a site's visits show as "page not shared". A new
+ *         "How they found you" sidebar group holds both.
+ *
  * 1.0.8 - Import / Export, and the app frame. One file (JSON, gzipped when the
  *         server can) carries the setup (settings, goals, automatic-goal
  *         switches, funnels, A/B tests, notes) and optionally the daily summary
@@ -136,7 +163,7 @@ $manifest['description'] = __(
  *         a live view, and an admin-bar "Heatmap" toggle on the front end.
  */
 
-$manifest['version']    = '1.0.8';
+$manifest['version']    = '1.0.10';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
 $manifest['thumbnail']  = 'thumbnail.svg';

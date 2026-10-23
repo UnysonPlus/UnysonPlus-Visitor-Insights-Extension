@@ -99,6 +99,42 @@ $options = array(
 						'desc'  => __( 'Where the pointer lingers on desktop, shown as a heatmap mode. Positions are sampled and counted per area in the visitor\'s browser; no trail is sent. Off by default: it is the most detailed thing the statistics record, so switch it on only if your consent setup covers it.', 'fw' ),
 						'value' => false,
 					),
+					'track_outbound'    => array(
+						'type'  => 'switch',
+						'label' => __( 'Exit links and downloads', 'fw' ),
+						'desc'  => __( 'Clicks on links that leave the site and on files (PDF, ZIP, documents). The address is kept without its query string.', 'fw' ),
+						'value' => true,
+					),
+					'track_returning'   => array(
+						'type'  => 'switch',
+						'label' => __( 'Returning visitors', 'fw' ),
+						'desc'  => __( 'New against returning visitors. Telling them apart needs a note on the device, so it is measured only for visitors who gave statistics consent (a WP Consent API plugin’s "statistics" answer, or UnysonPlusVI.grantStatistics() from your own banner). Everyone else is counted as before.', 'fw' ),
+						'value' => true,
+					),
+					'track_city'        => array(
+						'type'  => 'switch',
+						'label' => __( 'Regions and cities', 'fw' ),
+						'desc'  => __( 'Region and city next to the country, from your CDN’s location headers or a location database kept on this site (see City database below). The address is used for the lookup and then discarded.', 'fw' ),
+						'value' => true,
+					),
+					'track_bots'        => array(
+						'type'  => 'switch',
+						'label' => __( 'Bot report', 'fw' ),
+						'desc'  => __( 'Count the automated visitors that are filtered out (search crawlers, AI crawlers, monitors and tools), so the share of human traffic is visible.', 'fw' ),
+						'value' => true,
+					),
+					'visits_days'       => array(
+						'type'    => 'select',
+						'label'   => __( 'Keep visit paths', 'fw' ),
+						'desc'    => __( 'How long the log of individual visits (their pages in order) is kept. Daily totals follow the general retention setting.', 'fw' ),
+						'value'   => '30',
+						'choices' => array(
+							'7'  => __( '7 days', 'fw' ),
+							'14' => __( '14 days', 'fw' ),
+							'30' => __( '30 days', 'fw' ),
+							'90' => __( '90 days', 'fw' ),
+						),
+					),
 					'track_vitals'      => array(
 						'type'  => 'switch',
 						'label' => __( 'Real-visitor performance', 'fw' ),
