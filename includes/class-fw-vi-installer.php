@@ -16,7 +16,7 @@
  */
 class FW_VI_Installer {
 
-	const DB_VERSION        = '1.7.0';
+	const DB_VERSION        = '1.7.1';
 	const DB_VERSION_OPTION = 'fw_ext_visitor_insights_db_version';
 
 	const TABLES = array(
@@ -115,6 +115,7 @@ class FW_VI_Installer {
 
 		// dim: ref (referrer host), us / um / uc / ut (UTM source / medium /
 		// campaign / term), kw ("engine-host|search words", when passed),
+		// ci ("CC|Region|City"), ge ("CC|Region|City|lat,lon" for the map),
 		// rp (referring host + page path, when the referring site shares it),
 		// cc (country), br (browser), os, dev.
 		dbDelta( "CREATE TABLE {$t['sources']} (
@@ -433,6 +434,7 @@ class FW_VI_Installer {
 	br varchar(20) NOT NULL default '',
 	os varchar(20) NOT NULL default '',
 	ret char(1) NOT NULL default '',
+	ll varchar(20) NOT NULL default '',
 	steps text NULL,
 	PRIMARY KEY  (id),
 	KEY day (day),

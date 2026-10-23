@@ -134,6 +134,24 @@ class FW_VI_Digest {
 			$html .= '<h2 ' . $h2 . '>' . esc_html__( 'Most visited', 'fw' ) . '</h2>' . $list( $top, 'path' );
 		}
 
+		$found = self::found( $from, $to, $pfrom, $pto );
+		if ( $found['kw'] || $found['new_refs'] || $found['cities'] || $found['bots'] ) {
+			$html .= '<h2 ' . $h2 . '>' . esc_html__( 'How visitors found you', 'fw' ) . '</h2>';
+			if ( $found['kw'] ) {
+				$html .= '<p style="font:13px sans-serif;color:#646970">' . esc_html( $found['kw_source'] ) . '</p>' . $list( $found['kw'], 'label' );
+			}
+			if ( $found['new_refs'] ) {
+				$html .= '<p style="font:13px sans-serif;color:#646970">' . esc_html__( 'Pages and sites that sent visitors for the first time:', 'fw' ) . '</p>' . $list( $found['new_refs'], 'label' );
+			}
+			if ( $found['cities'] ) {
+				$html .= '<p style="font:13px sans-serif;color:#646970">' . esc_html__( 'Places that grew most (page views, against the week before):', 'fw' ) . '</p>' . $list( $found['cities'], 'label' );
+			}
+			if ( $found['bots'] ) {
+				/* translators: 1: bot requests, 2: share of all requests */
+				$html .= '<p style="font:13px sans-serif;color:#646970">' . esc_html( sprintf( __( 'Bots: %1$s requests, %2$s%% of all traffic, filtered out of the figures above.', 'fw' ), number_format_i18n( $found['bots'] ), number_format_i18n( $found['bot_share'] ) ) ) . '</p>';
+			}
+		}
+
 		if ( $friction || $errors || $broken ) {
 			$html .= '<h2 ' . $h2 . '>' . esc_html__( 'Worth a look', 'fw' ) . '</h2>';
 			if ( $broken ) {
@@ -166,6 +184,85 @@ class FW_VI_Digest {
 			'subject' => sprintf( __( '[%1$s] Your week: %2$s page views', 'fw' ), $site, number_format_i18n( $now['views'] ) ),
 			'html'    => $html,
 		);
+	}
+
+	/**
+	 * The "How visitors found you" part: the week's top search terms (Search
+	 * Console when connected, else the words recorded on visits), referring
+	 * pages and sites not seen in the four weeks before, the places that grew,
+	 * and the bot share.
+	 *
+	 * @return array
+	 */
+	public static function found( $from, $to, $pfrom, $pto ) {
+		global $wpdb;
+
+		$s   = FW_VI_Installer::table( 'sources' );
+		$row = function ( $label, $n ) {
+			return (object) array( 'label' => $label, 'n' => (int) $n );
+		};
+		$out = array( 'kw' => array(), 'kw_source' => '', 'new_refs' => array(), 'cities' => array(), 'bots' => 0, 'bot_share' => 0 );
+
+		$gsc = FW_VI_Keywords::console_range( $from, $to );
+		if ( $gsc['ok'] && $gsc['rows'] ) {
+			$q = array();
+			foreach ( $gsc['rows'] as $r ) {
+				$q[ $r[0] ] = ( $q[ $r[0] ] ?? 0 ) + $r[2];
+			}
+			arsort( $q );
+			foreach ( array_slice( array_filter( $q ), 0, 5, true ) as $k => $n ) {
+				$out['kw'][] = $row( $k, $n );
+			}
+			$out['kw_source'] = __( 'Top search terms (Search Console clicks; it runs a few days behind):', 'fw' );
+		}
+		if ( ! $out['kw'] ) {
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( "SELECT dim, val, SUM(n) n FROM {$s} WHERE dim IN ('kw','ut') AND day BETWEEN %s AND %s GROUP BY dim, val ORDER BY n DESC LIMIT 5", $from, $to ) ) as $r ) { // phpcs:ignore WordPress.DB
+				$parts       = explode( '|', (string) $r->val, 2 );
+				$out['kw'][] = $row( 'kw' === $r->dim ? ( $parts[1] ?? $parts[0] ) : $r->val, $r->n );
+			}
+			$out['kw_source'] = __( 'Search words recorded on visits:', 'fw' );
+		}
+
+		$before = wp_date( 'Y-m-d', strtotime( $from ) - 28 * DAY_IN_SECONDS );
+		foreach ( (array) $wpdb->get_results( $wpdb->prepare( // phpcs:ignore WordPress.DB
+			"SELECT a.val, SUM(a.n) n FROM {$s} a WHERE a.dim = %s AND a.day BETWEEN %s AND %s
+			 AND NOT EXISTS ( SELECT 1 FROM {$s} b WHERE b.dim = a.dim AND b.val = a.val AND b.day BETWEEN %s AND %s )
+			 GROUP BY a.val ORDER BY n DESC LIMIT 5",
+			'rp', $from, $to, $before, wp_date( 'Y-m-d', strtotime( $from ) - DAY_IN_SECONDS )
+		) ) as $r ) {
+			$out['new_refs'][] = $row( 'https://' . $r->val, $r->n );
+		}
+		if ( ! $out['new_refs'] ) {
+			foreach ( (array) $wpdb->get_results( $wpdb->prepare( // phpcs:ignore WordPress.DB
+				"SELECT a.val, SUM(a.n) n FROM {$s} a WHERE a.dim = 'ref' AND a.day BETWEEN %s AND %s
+				 AND NOT EXISTS ( SELECT 1 FROM {$s} b WHERE b.dim = 'ref' AND b.val = a.val AND b.day BETWEEN %s AND %s )
+				 GROUP BY a.val ORDER BY n DESC LIMIT 5",
+				$from, $to, $before, wp_date( 'Y-m-d', strtotime( $from ) - DAY_IN_SECONDS )
+			) ) as $r ) {
+				$out['new_refs'][] = $row( $r->val, $r->n );
+			}
+		}
+
+		$now  = wp_list_pluck( (array) $wpdb->get_results( $wpdb->prepare( "SELECT val, SUM(n) n FROM {$s} WHERE dim = 'ci' AND day BETWEEN %s AND %s GROUP BY val", $from, $to ) ), 'n', 'val' ); // phpcs:ignore WordPress.DB
+		$prev = wp_list_pluck( (array) $wpdb->get_results( $wpdb->prepare( "SELECT val, SUM(n) n FROM {$s} WHERE dim = 'ci' AND day BETWEEN %s AND %s GROUP BY val", $pfrom, $pto ) ), 'n', 'val' ); // phpcs:ignore WordPress.DB
+		$grow = array();
+		foreach ( $now as $k => $n ) {
+			$d = (int) $n - (int) ( $prev[ $k ] ?? 0 );
+			if ( $d > 0 ) {
+				$grow[ $k ] = $d;
+			}
+		}
+		arsort( $grow );
+		foreach ( array_slice( $grow, 0, 3, true ) as $k => $d ) {
+			$c               = explode( '|', (string) $k );
+			$out['cities'][] = $row( implode( ', ', array_filter( array( $c[2] ?? '', $c[1] ?? '', $c[0] ?? '' ) ) ) . ' (+' . number_format_i18n( $d ) . ')', $now[ $k ] );
+		}
+
+		$out['bots'] = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(n),0) FROM ' . FW_VI_Installer::table( 'bots' ) . ' WHERE day BETWEEN %s AND %s', $from, $to ) ); // phpcs:ignore WordPress.DB
+		$views       = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(views),0) FROM ' . FW_VI_Installer::table( 'views' ) . ' WHERE page_id = 0 AND day BETWEEN %s AND %s', $from, $to ) ); // phpcs:ignore WordPress.DB
+		$out['bot_share'] = $out['bots'] ? round( 100 * $out['bots'] / ( $out['bots'] + $views ) ) : 0;
+
+		return $out;
 	}
 
 	/**

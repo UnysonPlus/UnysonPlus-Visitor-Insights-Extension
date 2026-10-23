@@ -46,6 +46,7 @@ class FW_VI_Settings {
 			'digest'          => false,
 			'digest_to'       => '',
 			'alerts'          => false,
+			'alert_new_ref'   => false,
 			'consent_mode'    => 'auto',
 			'honor_gpc'       => true,
 			'retention_days'  => '395',

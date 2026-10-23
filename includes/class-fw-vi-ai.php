@@ -61,6 +61,201 @@ class FW_VI_AI {
 			'readonly'    => true,
 			'panel'       => true,
 		) );
+
+		fw_ai_register_ability( 'visitor-insights-acquisition', array(
+			'label'       => __( 'Visitor Insights: where visitors came from', 'fw' ),
+			'description' => 'Read how visitors found the site (or ONE page, given path such as "/pricing/") over the last N days: visits per channel (direct, search, social, AI assistants, email, paid, campaign, referral), the search terms that brought them (from Google Search Console when connected, with clicks, impressions and average position; otherwise the words some search engines still pass), the referring sites and the exact referring pages when shared, the top cities and countries, new against returning visitors, entry and exit pages with bounce rates, and the share of bot traffic. For one page it also returns the pages visitors came from and went to next. Use it for questions like "where did this week\'s visitors come from?" or "which pages do search visitors leave from?". All anonymous totals.',
+			'input'       => array(
+				'days' => array( 'type' => 'integer', 'minimum' => 1, 'maximum' => 365, 'default' => 30 ),
+				'path' => array( 'type' => 'string' ),
+			),
+			'permission'  => $perm,
+			'execute'     => array( __CLASS__, 'acquisition' ),
+			'readonly'    => true,
+		) );
+
+		fw_ai_register_ability( 'visitor-insights-visits', array(
+			'label'       => __( 'Visitor Insights: recent visits', 'fw' ),
+			'description' => 'Read recent individual visits from the visit log (no cookies, nothing identifying): when, channel, referring site or page, search words when known, region and city, device, new or returning, and the pages in order ending with any exit link or download. Filter with channel, place (city, region or country code), keyword, referrer, entry (a page path the visit started on) or through (a page path it went through). Use it to describe typical journeys or to find visits that behaved a certain way.',
+			'input'       => array(
+				'days'    => array( 'type' => 'integer', 'minimum' => 1, 'maximum' => 90, 'default' => 7 ),
+				'limit'   => array( 'type' => 'integer', 'minimum' => 1, 'maximum' => 50, 'default' => 20 ),
+				'channel' => array( 'type' => 'string' ),
+				'place'   => array( 'type' => 'string' ),
+				'keyword' => array( 'type' => 'string' ),
+				'referrer' => array( 'type' => 'string' ),
+				'entry'   => array( 'type' => 'string' ),
+				'through' => array( 'type' => 'string' ),
+			),
+			'permission'  => $perm,
+			'execute'     => array( __CLASS__, 'visits' ),
+			'readonly'    => true,
+		) );
+	}
+
+	/**
+	 * @param string $path as given ("/pricing/")
+	 *
+	 * @return int the page row id, or 0
+	 */
+	private static function page_id_for( $path ) {
+		global $wpdb;
+
+		$path = '/' . ltrim( (string) $path, '/' );
+		$base = rtrim( (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH ), '/' );
+		$full = '' !== $base && 0 !== strpos( $path, $base . '/' ) ? $base . $path : $path;
+
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . FW_VI_Installer::table( 'pages' ) . ' WHERE path IN (%s, %s, %s)', $full, trailingslashit( $full ), untrailingslashit( $full ) ) ); // phpcs:ignore WordPress.DB
+	}
+
+	/**
+	 * @param array $in
+	 *
+	 * @return array
+	 */
+	public static function acquisition( $in = array() ) {
+		FW_VI_Rollup::run();
+
+		$days = max( 1, min( 365, (int) ( $in['days'] ?? 30 ) ) );
+		$pid  = ! empty( $in['path'] ) ? self::page_id_for( $in['path'] ) : 0;
+
+		if ( ! empty( $in['path'] ) && ! $pid ) {
+			return array( 'error' => 'No visits recorded for that path.' );
+		}
+
+		$labels   = FW_VI_Channels::labels();
+		$channels = array();
+		foreach ( FW_VI_Reports::breakdown( 'ch', $days, 10, $pid ) as $k => $n ) {
+			$channels[ $labels[ $k ] ?? $k ] = (int) $n;
+		}
+
+		$path = $pid ? (string) FW_VI_Reports::page( $pid, $days )->path : '';
+		$same = function ( $p ) use ( $path ) {
+			return '' === $path || untrailingslashit( (string) $p ) === untrailingslashit( $path );
+		};
+		$gsc  = FW_VI_Keywords::console( $days );
+		$kw   = array();
+		foreach ( $gsc['rows'] as $r ) {
+			if ( $same( $r[1] ) ) {
+				$kw[] = array( 'term' => $r[0], 'page' => FW_VI_Keywords::show_path( $r[1] ), 'clicks' => $r[2], 'impressions' => $r[3], 'position' => $r[4] );
+			}
+		}
+		$kw = array_slice( $kw, 0, 25 );
+		$recorded = array();
+		foreach ( FW_VI_Keywords::recorded( $days ) as $r ) {
+			if ( $same( $r[1] ) ) {
+				$recorded[] = array( 'term' => $r[0], 'page' => FW_VI_Keywords::show_path( $r[1] ), 'visits' => $r[2], 'source' => 'referrer' === $r[3] ? $r[4] : 'campaign link' );
+			}
+		}
+
+		$places = array();
+		foreach ( FW_VI_Reports::breakdown( 'ci', $days, 10, $pid ) as $k => $n ) {
+			$c = explode( '|', (string) $k );
+			$places[ implode( ', ', array_filter( array( $c[2] ?? '', $c[1] ?? '', $c[0] ?? '' ) ) ) ] = (int) $n;
+		}
+
+		$out = array(
+			'days'               => $days,
+			'page'               => '' !== $path ? FW_VI_Keywords::show_path( $path ) : null,
+			'channels'           => $channels,
+			'search_console'     => $gsc['ok'] ? array( 'from' => $gsc['from'], 'to' => $gsc['to'], 'terms' => $kw ) : ( 'off' === ( $gsc['reason'] ?? '' ) ? 'not connected (connect it in SEO → Search Console)' : 'unavailable: ' . $gsc['reason'] ),
+			'search_words_recorded_on_visits' => array_slice( $recorded, 0, 25 ),
+			'referring_sites'    => FW_VI_Reports::breakdown( 'ref', $days, 15, $pid ),
+			'referring_pages'    => array_map( function ( $n ) { return (int) $n; }, FW_VI_Reports::breakdown( 'rp', $days, 15, $pid ) ),
+			'countries'          => FW_VI_Reports::breakdown( 'cc', $days, 10, $pid ),
+			'cities'             => $places,
+			'new_vs_returning'   => array( 'note' => 'measured only for visitors who gave statistics consent' ) + FW_VI_Reports::breakdown( 'rt', $days, 2, $pid ),
+		);
+
+		if ( $pid ) {
+			$flow               = FW_VI_Visits::next_pages( $pid, $days );
+			$out['came_from']   = array_slice( $flow['prev'], 0, 10, true );
+			$out['went_next']   = array_slice( $flow['next'], 0, 10, true );
+		} else {
+			$ends = function ( $rows ) {
+				return array_map( function ( $r ) {
+					return array( 'page' => FW_VI_Keywords::show_path( $r->path ), 'visits' => (int) $r->n, 'bounce_rate' => round( 100 * $r->bounces / max( 1, $r->n ) ) . '%' );
+				}, $rows );
+			};
+			$out['entry_pages'] = $ends( FW_VI_Reports::entry_pages( $days, 10 ) );
+			$out['exit_pages']  = $ends( FW_VI_Reports::exit_pages( $days, 10 ) );
+
+			global $wpdb;
+			list( $from, $to ) = FW_VI_Reports::range( $days );
+			$bots              = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(n),0) FROM ' . FW_VI_Installer::table( 'bots' ) . ' WHERE day BETWEEN %s AND %s', $from, $to ) ); // phpcs:ignore WordPress.DB
+			$human             = (int) FW_VI_Reports::totals( $days )['views'];
+			$out['bots']       = array( 'bot_requests' => $bots, 'human_page_views' => $human, 'bot_share' => $bots ? round( 100 * $bots / ( $bots + $human ) ) . '%' : '0%' );
+			$opp               = FW_VI_Keywords::opportunities( $days );
+			if ( $opp ) {
+				$out['search_opportunities'] = array(
+					'terms_climbing'  => $opp['rising'],
+					'terms_falling'   => $opp['falling'],
+					'second_page'     => array_map( function ( $p ) {
+						return array( 'page' => FW_VI_Keywords::show_path( $p['path'] ), 'main_term' => $p['query'], 'impressions' => $p['impressions'], 'clicks' => $p['clicks'], 'position' => $p['position'] );
+					}, $opp['second'] ),
+				);
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * @param array $in
+	 *
+	 * @return array
+	 */
+	public static function visits( $in = array() ) {
+		global $wpdb;
+
+		FW_VI_Rollup::run();
+
+		$days = max( 1, min( 90, (int) ( $in['days'] ?? 7 ) ) );
+		$f    = array(
+			'entry' => ! empty( $in['entry'] ) ? self::page_id_for( $in['entry'] ) : 0,
+			'ch'    => sanitize_key( (string) ( $in['channel'] ?? '' ) ),
+			'place' => sanitize_text_field( (string) ( $in['place'] ?? '' ) ),
+			'kw'    => sanitize_text_field( (string) ( $in['keyword'] ?? '' ) ),
+			'ref'   => sanitize_text_field( (string) ( $in['referrer'] ?? '' ) ),
+			'dev'   => '',
+			'ret'   => '',
+			'left'  => '',
+			'q'     => sanitize_text_field( (string) ( $in['through'] ?? '' ) ),
+		);
+		if ( ! empty( $in['entry'] ) && ! $f['entry'] ) {
+			return array( 'visits' => array(), 'note' => 'No visits recorded for that entry page.' );
+		}
+		// Channel names are accepted as shown ("AI assistants") or as keys ("ai").
+		$labels = FW_VI_Channels::labels();
+		if ( '' !== $f['ch'] && ! isset( $labels[ $f['ch'] ] ) ) {
+			$f['ch'] = (string) array_search( (string) ( $in['channel'] ?? '' ), $labels, true );
+		}
+
+		$limit = max( 1, min( 50, (int) ( $in['limit'] ?? 20 ) ) );
+		$rows  = $wpdb->get_results( 'SELECT * FROM ' . FW_VI_Installer::table( 'visits' ) . ' WHERE ' . FW_VI_Visits::where( $f, $days ) . ' ORDER BY started DESC LIMIT ' . $limit ); // phpcs:ignore WordPress.DB
+		$paths = wp_list_pluck( (array) $wpdb->get_results( 'SELECT id, path FROM ' . FW_VI_Installer::table( 'pages' ) ), 'path', 'id' ); // phpcs:ignore WordPress.DB
+		$dev   = array( 'd' => 'desktop', 't' => 'tablet', 'm' => 'mobile' );
+
+		$out = array();
+		foreach ( (array) $rows as $v ) {
+			$steps = array();
+			foreach ( (array) json_decode( (string) $v->steps, true ) as $st ) {
+				$steps[] = 'o' === ( $st[1] ?? '' ) ? ( ( 'd' === ( $st[3] ?? '' ) ? 'downloaded ' : 'left by link to ' ) . $st[2] ) : FW_VI_Keywords::show_path( $paths[ $st[1] ] ?? '?' );
+			}
+			$out[] = array(
+				'started'   => wp_date( 'Y-m-d H:i', (int) $v->started ),
+				'seconds'   => (int) $v->last_seen - (int) $v->started,
+				'channel'   => $labels[ $v->ch ] ?? $v->ch,
+				'from'      => '' !== $v->rp ? 'https://' . $v->rp : ( '' !== $v->ref ? $v->ref : null ),
+				'search'    => '' !== $v->kw ? $v->kw : null,
+				'place'     => implode( ', ', array_filter( array( $v->city, $v->region, $v->cc ) ) ),
+				'device'    => $dev[ $v->dev ] ?? $v->dev,
+				'returning' => 'r' === $v->ret ? true : ( 'n' === $v->ret ? false : null ),
+				'path'      => $steps,
+			);
+		}
+
+		return array( 'days' => $days, 'kept_days' => (int) FW_VI_Settings::get()['visits_days'], 'visits' => $out );
 	}
 
 	/**

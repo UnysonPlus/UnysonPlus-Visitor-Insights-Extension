@@ -232,6 +232,12 @@ $options = array(
 						'desc'  => __( 'An email the morning after script errors, broken links or traffic move far from the usual (compared with the week before). Nothing is sent on a normal day.', 'fw' ),
 						'value' => false,
 					),
+					'alert_new_ref' => array(
+						'type'  => 'switch',
+						'label' => __( 'Tell me about new referring sites', 'fw' ),
+						'desc'  => __( 'With alerts on: an email when a site that never sent visitors before sends three or more in a day — a new link, a mention or a review worth knowing about.', 'fw' ),
+						'value' => false,
+					),
 					'digest_to' => array(
 						'type'  => 'text',
 						'label' => __( 'Send it to', 'fw' ),

@@ -14,6 +14,23 @@ $manifest['description'] = __(
 /**
  * Changelog ----------------------------------------------------------------
  *
+ * 1.0.11 - From numbers to answers (Phase 10). Everything about one page: a
+ *          view per page (from the Pages list) with its trend, channels,
+ *          keywords, referring pages, entry and exit share, the pages visitors
+ *          came from and went to next (FW_VI_Visits::next_pages), its goals,
+ *          forms, exit links, devices and places. The visit log gains filters
+ *          (place, search words, referring site, device, new or returning, how
+ *          the visit left, a page it went through) and a CSV download. Search
+ *          Console opportunities on the Keywords view: terms climbing and
+ *          falling, and pages sitting on the second page of results. A visitor
+ *          map drawn from a Natural Earth outline shipped with the extension
+ *          (static/data/world.json), countries shaded and cities as dots; the
+ *          collector keeps a city's coordinates to one decimal. The weekly
+ *          email adds "How visitors found you"; an optional alert names a new
+ *          referring site. Two AI Assistant abilities: where visitors came from,
+ *          and recent visits. Page tokens now last 45 days, so pages a cache
+ *          keeps for weeks are still counted. Schema 1.7.1.
+ *
  * 1.0.10 - How visitors found you, completed (Phase 9). Visitor paths: page
  *          views joined into visits (today's visitor hash, 30-minute gap) in
  *          fw_vi_visits, listed with where each came from, region and city,
@@ -163,7 +180,7 @@ $manifest['description'] = __(
  *         a live view, and an admin-bar "Heatmap" toggle on the front end.
  */
 
-$manifest['version']    = '1.0.10';
+$manifest['version']    = '1.0.11';
 $manifest['display']    = true;
 $manifest['standalone'] = true;
 $manifest['thumbnail']  = 'thumbnail.svg';

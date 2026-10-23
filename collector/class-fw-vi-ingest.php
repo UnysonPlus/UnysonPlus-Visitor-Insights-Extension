@@ -30,7 +30,9 @@ class FW_VI_Ingest {
 
 	const MAX_BODY   = 16384;
 	const MAX_EVENTS = 300;
-	const TOKEN_DAYS = 8;
+	// A page token is accepted for 45 days, so a page that a cache keeps for
+	// weeks is still counted; it only allows reporting visits to that page.
+	const TOKEN_DAYS = 45;
 
 	/**
 	 * The page token. Shared by the page that mints it and the collector that
@@ -122,6 +124,7 @@ class FW_VI_Ingest {
 				$geo   = FW_VI_Geo::locate( $ip, (string) ( $config['geo_db'] ?? '' ) );
 				$cc    = '' !== $cc ? $cc : $geo['cc'];
 				$pv[8] = '' !== $geo['city'] ? $geo['region'] . '|' . $geo['city'] : '';
+				$pv[9] = '' !== $pv[8] && preg_match( '/^-?\d{1,2}(\.\d)?,-?\d{1,3}(\.\d)?$/', (string) ( $geo['ll'] ?? '' ) ) ? $geo['ll'] : '';
 			}
 		} elseif ( ! $events ) {
 			return 204;

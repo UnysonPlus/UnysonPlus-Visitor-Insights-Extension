@@ -111,6 +111,27 @@ class FW_VI_Alerts {
 			);
 		}
 
+		if ( FW_VI_Settings::get()['alert_new_ref'] ) {
+			$src = FW_VI_Installer::table( 'sources' );
+			$new = $wpdb->get_results( $wpdb->prepare( // phpcs:ignore WordPress.DB
+				"SELECT a.val, SUM(a.n) n FROM {$src} a WHERE a.dim = 'ref' AND a.day = %s
+				 AND NOT EXISTS ( SELECT 1 FROM {$src} b WHERE b.dim = 'ref' AND b.val = a.val AND b.day BETWEEN %s AND %s )
+				 GROUP BY a.val HAVING n >= 3 ORDER BY n DESC LIMIT 5",
+				$y,
+				wp_date( 'Y-m-d', time() - 61 * DAY_IN_SECONDS ),
+				wp_date( 'Y-m-d', time() - 2 * DAY_IN_SECONDS )
+			) );
+			foreach ( (array) $new as $r ) {
+				$pages = $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT val FROM {$src} WHERE dim = 'rp' AND day = %s AND val LIKE %s LIMIT 3", $y, $wpdb->esc_like( $r->val ) . '/%' ) ); // phpcs:ignore WordPress.DB
+				$out[] = array(
+					'kind'   => 'new-ref',
+					'title'  => __( 'A new site sent you visitors', 'fw' ),
+					/* translators: 1: site, 2: visits, 3: the pages that linked, or nothing */
+					'detail' => sprintf( __( '%1$s sent %2$s visitors yesterday, and never before.%3$s', 'fw' ), $r->val, number_format_i18n( $r->n ), $pages ? ' ' . sprintf( __( 'From: %s', 'fw' ), implode( ', ', array_map( function ( $p ) { return 'https://' . $p; }, $pages ) ) ) : '' ),
+				);
+			}
+		}
+
 		return $out;
 	}
 

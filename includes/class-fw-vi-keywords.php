@@ -44,22 +44,40 @@ class FW_VI_Keywords {
 			return array( 'ok' => false, 'reason' => 'off', 'rows' => array() );
 		}
 
-		$key = self::CACHE . (int) $days;
+		$window = FW_SEO_Console::window( $days );
+
+		return self::console_range( $window['start'], $window['end'], $fresh );
+	}
+
+	/**
+	 * The same, for any dates (Y-m-d).
+	 *
+	 * @param string $start
+	 * @param string $end
+	 * @param bool   $fresh
+	 *
+	 * @return array
+	 */
+	public static function console_range( $start, $end, $fresh = false ) {
+		if ( ! self::console_ready() ) {
+			return array( 'ok' => false, 'reason' => 'off', 'rows' => array() );
+		}
+
+		$key = self::CACHE . md5( $start . '|' . $end );
 		$hit = $fresh ? false : get_transient( $key );
 
 		if ( is_array( $hit ) ) {
 			return $hit;
 		}
 
-		$window = FW_SEO_Console::window( $days );
 		$result = FW_SEO_Console::query( array(
-			'startDate'  => $window['start'],
-			'endDate'    => $window['end'],
+			'startDate'  => $start,
+			'endDate'    => $end,
 			'dimensions' => array( 'query', 'page' ),
 			'rowLimit'   => self::LIMIT,
 		) );
 
-		$out = array( 'ok' => (bool) $result['ok'], 'reason' => (string) $result['reason'], 'rows' => array(), 'from' => $window['start'], 'to' => $window['end'] );
+		$out = array( 'ok' => (bool) $result['ok'], 'reason' => (string) $result['reason'], 'rows' => array(), 'from' => $start, 'to' => $end );
 
 		foreach ( (array) $result['rows'] as $r ) {
 			$out['rows'][] = array(
@@ -74,6 +92,145 @@ class FW_VI_Keywords {
 		set_transient( $key, $out, $out['ok'] ? 12 * HOUR_IN_SECONDS : 15 * MINUTE_IN_SECONDS );
 
 		return $out;
+	}
+
+	/**
+	 * What Search Console says is worth acting on:
+	 *  - rising / falling: search terms whose clicks moved most against the
+	 *    period before (at least 3 clicks in one of the two);
+	 *  - second page: pages shown at an average position of 8 to 20 with at
+	 *    least 10 impressions — seen, mostly on page two, where a better title,
+	 *    description or more content tends to lift them.
+	 *
+	 * @param int $days
+	 *
+	 * @return array|null { rising, falling: [ [ query, now, before ] ], second: [ { path, query, impressions, position, clicks } ] }, null without Search Console
+	 */
+	public static function opportunities( $days ) {
+		$now = self::console( $days );
+
+		if ( ! $now['ok'] ) {
+			return null;
+		}
+
+		$days   = max( 1, (int) $days );
+		$before = self::console_range(
+			gmdate( 'Y-m-d', strtotime( $now['from'] ) - $days * DAY_IN_SECONDS ),
+			gmdate( 'Y-m-d', strtotime( $now['from'] ) - DAY_IN_SECONDS )
+		);
+
+		$sum = function ( array $rows ) {
+			$out = array();
+			foreach ( $rows as $r ) {
+				$out[ $r[0] ] = ( $out[ $r[0] ] ?? 0 ) + $r[2];
+			}
+			return $out;
+		};
+		$a     = $sum( $now['rows'] );
+		$b     = $before['ok'] ? $sum( $before['rows'] ) : array();
+		$moves = array();
+		foreach ( array_unique( array_merge( array_keys( $a ), array_keys( $b ) ) ) as $q ) {
+			$n = $a[ $q ] ?? 0;
+			$p = $b[ $q ] ?? 0;
+			if ( max( $n, $p ) >= 3 && $n !== $p ) {
+				$moves[] = array( $q, $n, $p );
+			}
+		}
+		usort( $moves, function ( $x, $y ) {
+			return ( $y[1] - $y[2] ) <=> ( $x[1] - $x[2] );
+		} );
+
+		$pages = array();
+		foreach ( $now['rows'] as $r ) {
+			$k = $r[1];
+			if ( ! isset( $pages[ $k ] ) ) {
+				$pages[ $k ] = array( 'path' => $k, 'query' => $r[0], 'top' => 0, 'impressions' => 0, 'clicks' => 0, 'pos' => 0 );
+			}
+			$pages[ $k ]['impressions'] += $r[3];
+			$pages[ $k ]['clicks']      += $r[2];
+			$pages[ $k ]['pos']         += $r[4] * $r[3];
+			if ( $r[3] > $pages[ $k ]['top'] ) {
+				$pages[ $k ]['top']   = $r[3];
+				$pages[ $k ]['query'] = $r[0];
+			}
+		}
+		$second = array();
+		foreach ( $pages as $pg ) {
+			$pg['position'] = $pg['impressions'] ? round( $pg['pos'] / $pg['impressions'], 1 ) : 0;
+			if ( $pg['impressions'] >= 10 && $pg['position'] >= 8 && $pg['position'] <= 20 ) {
+				$second[] = $pg;
+			}
+		}
+		usort( $second, function ( $x, $y ) {
+			return $y['impressions'] <=> $x['impressions'];
+		} );
+
+		return array(
+			'rising'  => array_slice( array_filter( $moves, function ( $m ) { return $m[1] > $m[2]; } ), 0, 10 ),
+			'falling' => array_slice( array_reverse( array_filter( $moves, function ( $m ) { return $m[1] < $m[2]; } ) ), 0, 10 ),
+			'second'  => array_slice( $second, 0, 15 ),
+		);
+	}
+
+	/**
+	 * @param int $days
+	 */
+	private static function render_opportunities( $days ) {
+		$o = self::opportunities( $days );
+
+		if ( null === $o ) {
+			return;
+		}
+		?>
+		<h2 class="fw-vi-section"><?php esc_html_e( 'Opportunities', 'fw' ); ?></h2>
+		<div class="fw-vi-grid fw-vi-grid--2">
+			<?php foreach ( array( 'rising' => __( 'Search terms climbing', 'fw' ), 'falling' => __( 'Search terms falling', 'fw' ) ) as $k => $title ) : ?>
+				<div class="fw-vi-card">
+					<h2><?php echo esc_html( $title ); ?></h2>
+					<?php if ( ! $o[ $k ] ) : ?>
+						<p class="description"><?php esc_html_e( 'Nothing moved noticeably against the period before.', 'fw' ); ?></p>
+					<?php else : ?>
+						<table class="widefat striped fw-vi-table">
+							<thead><tr><th><?php esc_html_e( 'Search term', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Clicks', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Before', 'fw' ); ?></th></tr></thead>
+							<tbody>
+							<?php foreach ( $o[ $k ] as $m ) : ?>
+								<tr><td><?php echo esc_html( $m[0] ); ?></td><td class="num"><?php echo esc_html( number_format_i18n( $m[1] ) ); ?></td><td class="num"><?php echo esc_html( number_format_i18n( $m[2] ) ); ?></td></tr>
+							<?php endforeach; ?>
+							</tbody>
+						</table>
+					<?php endif; ?>
+				</div>
+			<?php endforeach; ?>
+		</div>
+		<div class="fw-vi-card">
+			<h2><?php esc_html_e( 'Almost on the first page', 'fw' ); ?></h2>
+			<p class="description"><?php esc_html_e( 'Pages Google shows at an average position of 8 to 20 — mostly on the second page of results. A clearer title and description, or more on the search term below, is often what lifts them.', 'fw' ); ?></p>
+			<?php if ( ! $o['second'] ) : ?>
+				<p><?php esc_html_e( 'No page is sitting on the second page with enough impressions right now.', 'fw' ); ?></p>
+			<?php else : ?>
+				<table class="widefat striped fw-vi-table">
+					<thead><tr><th><?php esc_html_e( 'Page', 'fw' ); ?></th><th><?php esc_html_e( 'Main search term', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Shown', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Clicks', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Position', 'fw' ); ?></th><th></th></tr></thead>
+					<tbody>
+					<?php foreach ( $o['second'] as $pg ) : ?>
+						<?php $post = url_to_postid( home_url( self::show_path( $pg['path'] ) ) ); ?>
+						<tr>
+							<td><?php echo esc_html( self::show_path( $pg['path'] ) ); ?></td>
+							<td><?php echo esc_html( $pg['query'] ); ?></td>
+							<td class="num"><?php echo esc_html( number_format_i18n( $pg['impressions'] ) ); ?></td>
+							<td class="num"><?php echo esc_html( number_format_i18n( $pg['clicks'] ) ); ?></td>
+							<td class="num"><?php echo esc_html( number_format_i18n( $pg['position'], 1 ) ); ?></td>
+							<td class="num">
+								<?php if ( $post && current_user_can( 'edit_post', $post ) ) : ?>
+									<a class="button button-small" href="<?php echo esc_url( (string) get_edit_post_link( $post ) ); ?>"><?php esc_html_e( 'Edit title & description', 'fw' ); ?></a>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+			<?php endif; ?>
+		</div>
+		<?php
 	}
 
 	/**
@@ -158,6 +315,8 @@ class FW_VI_Keywords {
 			<h2><?php esc_html_e( 'From Search Console', 'fw' ); ?></h2>
 			<?php self::render_console( $gsc ); ?>
 		</div>
+
+		<?php if ( '' === $filter ) { self::render_opportunities( $days ); } ?>
 
 		<div class="fw-vi-card">
 			<h2><?php esc_html_e( 'Recorded on visits', 'fw' ); ?></h2>

@@ -186,14 +186,14 @@ class FW_VI_Rollup {
 				$dims = array( 'dev' => $dev, 'cc' => $cc, 'br' => $br, 'os' => $os );
 
 				if ( is_array( $pv ) ) {
-					$dims += array( 'ref' => $pv[0] ?? '', 'us' => $pv[1] ?? '', 'um' => $pv[2] ?? '', 'uc' => $pv[3] ?? '', 'kw' => ! empty( $pv[4] ) ? $pv[0] . '|' . $pv[4] : '', 'ut' => $pv[5] ?? '', 'rp' => ! empty( $pv[6] ) && '/' === $pv[6][0] ? $pv[0] . $pv[6] : '', 'rt' => $pv[7] ?? '', 'ci' => ! empty( $pv[8] ) ? $cc . '|' . $pv[8] : '' );
+					$dims += array( 'ref' => $pv[0] ?? '', 'us' => $pv[1] ?? '', 'um' => $pv[2] ?? '', 'uc' => $pv[3] ?? '', 'kw' => ! empty( $pv[4] ) ? $pv[0] . '|' . $pv[4] : '', 'ut' => $pv[5] ?? '', 'rp' => ! empty( $pv[6] ) && '/' === $pv[6][0] ? $pv[0] . $pv[6] : '', 'rt' => $pv[7] ?? '', 'ci' => ! empty( $pv[8] ) ? $cc . '|' . $pv[8] : '', 'ge' => ! empty( $pv[8] ) && ! empty( $pv[9] ) ? $cc . '|' . $pv[8] . '|' . $pv[9] : '' );
 				}
 
 				$dims['ch']    = FW_VI_Channels::classify( $pv[0] ?? '', $pv[1] ?? '', $pv[2] ?? '' );
 				$vidch[ $vid ] = $dims['ch'];
 
 				if ( '' !== $vh ) {
-					$vq[] = array( (int) $ts, $vh, $vid, 'p', $day, array( 'page' => $page, 'dims' => $dims, 'kw' => ! empty( $pv[4] ) ? $pv[4] : ( $pv[5] ?? '' ), 'city' => $pv[8] ?? '' ) );
+					$vq[] = array( (int) $ts, $vh, $vid, 'p', $day, array( 'page' => $page, 'dims' => $dims, 'kw' => ! empty( $pv[4] ) ? $pv[4] : ( $pv[5] ?? '' ), 'city' => $pv[8] ?? '', 'll' => $pv[9] ?? '' ) );
 				}
 				self::add( $agg['chd'], array( $page, $day, $dims['ch'] ), array( 1, 0, 0, 0 ) );
 				$hq[] = array( $vid, $page, $day, $dev, 'v', '', 0, 0, 1 );

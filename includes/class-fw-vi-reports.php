@@ -72,12 +72,12 @@ class FW_VI_Reports {
 	 *
 	 * @return array [ {date, views, uniques} ]
 	 */
-	public static function series( $days ) {
+	public static function series( $days, $page_id = 0 ) {
 		global $wpdb;
 
 		list( $from, $to ) = self::range( $days );
 		$t    = FW_VI_Installer::table( 'views' );
-		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT day, SUM(views) v, SUM(uniques) u FROM {$t} WHERE page_id = 0 AND day BETWEEN %s AND %s GROUP BY day", $from, $to ), OBJECT_K ); // phpcs:ignore WordPress.DB
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT day, SUM(views) v, SUM(uniques) u FROM {$t} WHERE page_id = %d AND day BETWEEN %s AND %s GROUP BY day", (int) $page_id, $from, $to ), OBJECT_K ); // phpcs:ignore WordPress.DB
 
 		$out = array();
 		for ( $ts = strtotime( $from . ' 12:00:00' ), $end = strtotime( $to . ' 12:00:00' ); $ts <= $end; $ts += DAY_IN_SECONDS ) {
@@ -146,16 +146,74 @@ class FW_VI_Reports {
 	 *
 	 * @return array [ val => n ]
 	 */
-	public static function breakdown( $dim, $days, $limit = 10 ) {
+	public static function breakdown( $dim, $days, $limit = 10, $page_id = 0 ) {
 		global $wpdb;
 
 		list( $from, $to ) = self::range( $days );
-		$t = FW_VI_Installer::table( 'sources' );
+		$t    = FW_VI_Installer::table( 'sources' );
+		$page = $page_id ? $wpdb->prepare( ' AND page_id = %d', $page_id ) : '';
 
 		return wp_list_pluck( $wpdb->get_results( $wpdb->prepare(
-			"SELECT val, SUM(n) n FROM {$t} WHERE dim = %s AND day BETWEEN %s AND %s GROUP BY val ORDER BY n DESC LIMIT %d",
+			"SELECT val, SUM(n) n FROM {$t} WHERE dim = %s AND day BETWEEN %s AND %s{$page} GROUP BY val ORDER BY n DESC LIMIT %d",
 			$dim, $from, $to, $limit
 		) ), 'n', 'val' ); // phpcs:ignore WordPress.DB
+	}
+
+	/**
+	 * One page's figures for the period, shaped like a top_pages() row.
+	 *
+	 * @param int $page_id
+	 * @param int $days
+	 *
+	 * @return object|null
+	 */
+	public static function page( $page_id, $days ) {
+		global $wpdb;
+
+		$p   = FW_VI_Installer::table( 'pages' );
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT id, path, post_id FROM {$p} WHERE id = %d", $page_id ) ); // phpcs:ignore WordPress.DB
+
+		if ( ! $row ) {
+			return null;
+		}
+
+		list( $from, $to ) = self::range( $days );
+		list( $pf, $pt )   = self::previous_range( $days );
+		$v = FW_VI_Installer::table( 'views' );
+		$s = FW_VI_Installer::table( 'scroll' );
+
+		$now  = $wpdb->get_row( $wpdb->prepare( "SELECT COALESCE(SUM(views),0) views, COALESCE(SUM(uniques),0) uniques, COALESCE(SUM(engaged_ms),0) engaged FROM {$v} WHERE page_id = %d AND day BETWEEN %s AND %s", $page_id, $from, $to ) ); // phpcs:ignore WordPress.DB
+		$prev = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(views),0) FROM {$v} WHERE page_id = %d AND day BETWEEN %s AND %s", $page_id, $pf, $pt ) ); // phpcs:ignore WordPress.DB
+		$half = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COALESCE(SUM(n),0) FROM {$s} WHERE page_id = %d AND band = 50 AND day BETWEEN %s AND %s", $page_id, $from, $to ) ); // phpcs:ignore WordPress.DB
+
+		$row->views   = (int) $now->views;
+		$row->uniques = (int) $now->uniques;
+		$row->engaged = $row->views ? round( $now->engaged / $row->views / 1000, 1 ) : 0;
+		$row->half    = $row->views ? min( 100, round( 100 * $half / $row->views ) ) : null;
+		$row->title   = $row->post_id ? get_the_title( (int) $row->post_id ) : '';
+		$row->prev    = $prev;
+
+		return $row;
+	}
+
+	/**
+	 * Rows of a per-page table for one page and period.
+	 *
+	 * @param string $which  table key
+	 * @param string $select columns and aggregates
+	 * @param string $group  GROUP BY / ORDER BY tail
+	 * @param int    $page_id
+	 * @param int    $days
+	 *
+	 * @return array
+	 */
+	public static function for_page( $which, $select, $group, $page_id, $days ) {
+		global $wpdb;
+
+		list( $from, $to ) = self::range( $days );
+		$t = FW_VI_Installer::table( $which );
+
+		return (array) $wpdb->get_results( $wpdb->prepare( "SELECT {$select} FROM {$t} WHERE page_id = %d AND day BETWEEN %s AND %s {$group}", $page_id, $from, $to ) ); // phpcs:ignore WordPress.DB
 	}
 
 	/**

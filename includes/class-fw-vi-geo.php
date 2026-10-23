@@ -24,7 +24,7 @@ class FW_VI_Geo {
 	 * @param string $ip
 	 * @param string $db path of a .mmdb file, or ''
 	 *
-	 * @return array { cc, region, city }
+	 * @return array { cc, region, city, ll } — ll is "lat,lon" to one decimal (about 10 km), or ''
 	 */
 	public static function locate( $ip, $db ) {
 		$out = self::from_headers();
@@ -40,6 +40,9 @@ class FW_VI_Geo {
 				$out['cc']     = '' !== $out['cc'] ? $out['cc'] : strtoupper( (string) ( $rec['country']['iso_code'] ?? '' ) );
 				$out['region'] = (string) ( $rec['subdivisions'][0]['names']['en'] ?? '' );
 				$out['city']   = (string) ( $rec['city']['names']['en'] ?? '' );
+				if ( isset( $rec['location']['latitude'], $rec['location']['longitude'] ) ) {
+					$out['ll'] = round( (float) $rec['location']['latitude'], 1 ) . ',' . round( (float) $rec['location']['longitude'], 1 );
+				}
 			}
 		}
 
@@ -61,7 +64,11 @@ class FW_VI_Geo {
 		$city   = $h( 'HTTP_CF_IPCITY' ) ?: rawurldecode( $h( 'HTTP_X_VERCEL_IP_CITY' ) ) ?: $h( 'HTTP_CLOUDFRONT_VIEWER_CITY' ) ?: $h( 'GEOIP_CITY' );
 		$region = $h( 'HTTP_CF_REGION' ) ?: $h( 'HTTP_CLOUDFRONT_VIEWER_COUNTRY_REGION_NAME' ) ?: $h( 'GEOIP_REGION_NAME' ) ?: $h( 'HTTP_X_VERCEL_IP_COUNTRY_REGION' );
 
-		return array( 'cc' => '', 'region' => $region, 'city' => $city );
+		$lat = $h( 'HTTP_CF_IPLATITUDE' ) ?: $h( 'HTTP_X_VERCEL_IP_LATITUDE' ) ?: $h( 'HTTP_CLOUDFRONT_VIEWER_LATITUDE' );
+		$lon = $h( 'HTTP_CF_IPLONGITUDE' ) ?: $h( 'HTTP_X_VERCEL_IP_LONGITUDE' ) ?: $h( 'HTTP_CLOUDFRONT_VIEWER_LONGITUDE' );
+		$ll  = is_numeric( $lat ) && is_numeric( $lon ) ? round( (float) $lat, 1 ) . ',' . round( (float) $lon, 1 ) : '';
+
+		return array( 'cc' => '', 'region' => $region, 'city' => $city, 'll' => '' !== $city ? $ll : '' );
 	}
 }
 

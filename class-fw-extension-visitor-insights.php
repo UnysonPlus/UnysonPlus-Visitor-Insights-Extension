@@ -95,10 +95,12 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 			require_once $dir . 'class-fw-vi-transfer.php';
 			require_once $dir . 'class-fw-vi-keywords.php';
 			require_once $dir . 'class-fw-vi-referrers.php';
+			require_once $dir . 'class-fw-vi-map.php';
 
 			new FW_VI_Dashboard();
 			new FW_VI_Export();
 			new FW_VI_Transfer();
+			add_action( 'admin_post_' . FW_VI_Visits::EXPORT, array( 'FW_VI_Visits', 'export' ) );
 
 			new FW_VI_Admin_Page( $this );
 		}

@@ -58,6 +58,7 @@ class FW_VI_App {
 				'items' => array(
 					'overview' => array( 'label' => __( 'Overview', 'fw' ), 'icon' => 'dashicons-chart-area' ),
 					'live'     => array( 'label' => __( 'Live', 'fw' ), 'icon' => 'dashicons-visibility' ),
+					'map'      => array( 'label' => __( 'Visitor map', 'fw' ), 'icon' => 'dashicons-admin-site-alt3' ),
 				),
 			),
 			'found'      => array(

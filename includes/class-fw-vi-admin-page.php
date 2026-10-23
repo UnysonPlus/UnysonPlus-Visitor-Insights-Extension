@@ -122,7 +122,8 @@ class FW_VI_Admin_Page {
 	private function tab() {
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'overview'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
-		return in_array( $tab, FW_VI_App::views(), true ) ? $tab : 'overview';
+		// The one-page view is reached from a page, not from the sidebar.
+		return in_array( $tab, array_merge( FW_VI_App::views(), array( 'page' ) ), true ) ? $tab : 'overview';
 	}
 
 	/**
@@ -154,6 +155,10 @@ class FW_VI_Admin_Page {
 			FW_VI_Recordings::enqueue_player( $this->ext );
 		}
 		wp_enqueue_script( 'fw-vi-admin', $this->ext->get_uri( '/static/js/admin/admin.js' ), array(), $ver, true );
+
+		if ( 'map' === $this->tab() ) {
+			wp_enqueue_script( 'fw-vi-map', $this->ext->get_uri( '/static/js/admin/visitor-map.js' ), array(), $ver, true );
+		}
 		wp_localize_script( 'fw-vi-admin', 'UPVIA', array(
 			'live'  => esc_url_raw( rest_url( FW_VI_REST::NS . '/live' ) ),
 			'nonce' => wp_create_nonce( 'wp_rest' ),
@@ -291,15 +296,23 @@ class FW_VI_Admin_Page {
 		$tab = $this->tab();
 
 		ob_start();
-		if ( in_array( $tab, array( 'overview', 'keywords', 'referrers', 'paths', 'outbound', 'bots', 'pages', 'goals', 'funnels', 'forms', 'search', 'frustration', 'performance' ), true ) ) {
+		if ( in_array( $tab, array( 'overview', 'map', 'page', 'keywords', 'referrers', 'paths', 'outbound', 'bots', 'pages', 'goals', 'funnels', 'forms', 'search', 'frustration', 'performance' ), true ) ) {
 			$this->render_range( $tab );
 		}
 
-		FW_VI_App::app()->open( $tab, array(
+		$bar = array(
 			'crumbs'  => 'overview' === $tab ? array() : array( array( __( 'Visitor Insights', 'fw' ), self::url() ) ),
 			'actions' => (string) ob_get_clean(),
 			'class'   => 'fw-vi',
-		) );
+		);
+
+		if ( 'page' === $tab ) {
+			$detail          = isset( $_GET['pid'] ) ? FW_VI_Reports::page( absint( $_GET['pid'] ), $this->days() ) : null; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$bar['title']    = $detail ? ( '' !== $detail->title ? $detail->title : FW_VI_Keywords::show_path( $detail->path ) ) : __( 'Page', 'fw' );
+			$bar['crumbs'][] = array( __( 'Pages', 'fw' ), self::url( 'pages', array( 'days' => $this->days() ) ) );
+		}
+
+		FW_VI_App::app()->open( 'page' === $tab ? 'pages' : $tab, $bar );
 
 		$this->render_notice();
 		?>
@@ -308,6 +321,12 @@ class FW_VI_Admin_Page {
 				case 'pages':
 					$this->render_pages();
 					FW_VI_Visits::render_ends( $this->days() );
+					break;
+				case 'page':
+					$this->render_page_detail();
+					break;
+				case 'map':
+					FW_VI_Map::render( $this->days() );
 					break;
 				case 'paths':
 					FW_VI_Visits::render( $this->days() );
@@ -398,7 +417,7 @@ class FW_VI_Admin_Page {
 		foreach ( self::RANGES as $d ) {
 			printf(
 				'<a href="%1$s" class="%2$s">%3$s</a>',
-				esc_url( self::url( $tab, array_filter( array( 'days' => $d, 'device' => isset( $_GET['device'] ) ? sanitize_key( wp_unslash( $_GET['device'] ) ) : '' ) ) ) ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+				esc_url( self::url( $tab, array_filter( array( 'days' => $d, 'device' => isset( $_GET['device'] ) ? sanitize_key( wp_unslash( $_GET['device'] ) ) : '', 'pid' => isset( $_GET['pid'] ) ? absint( $_GET['pid'] ) : 0, 'entry' => isset( $_GET['entry'] ) ? absint( $_GET['entry'] ) : 0, 'ch' => isset( $_GET['ch'] ) ? sanitize_key( wp_unslash( $_GET['ch'] ) ) : '' ) ) ) ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 				$d === $days ? 'is-active' : '',
 				esc_html( 365 === $d ? __( '12 months', 'fw' ) : sprintf( _n( '%d day', '%d days', $d, 'fw' ), $d ) )
 			);
@@ -576,7 +595,7 @@ class FW_VI_Admin_Page {
 			<?php foreach ( $rows as $r ) : ?>
 				<tr>
 					<td>
-						<?php if ( '' !== $r->title ) : ?><strong><?php echo esc_html( $r->title ); ?></strong><br><?php endif; ?>
+						<a class="fw-vi-pagelink" href="<?php echo esc_url( self::url( 'page', array( 'pid' => $r->id, 'days' => $this->days() ) ) ); ?>"><strong><?php echo esc_html( '' !== $r->title ? $r->title : FW_VI_Keywords::show_path( $r->path ) ); ?></strong></a><br>
 						<a href="<?php echo esc_url( FW_VI_Reports::url( $r->path ) ); ?>" target="_blank" rel="noopener"><code><?php echo esc_html( $r->path ); ?></code></a>
 					</td>
 					<td class="num"><?php echo esc_html( number_format_i18n( $r->views ) ); ?></td>
@@ -594,6 +613,187 @@ class FW_VI_Admin_Page {
 			<?php endforeach; ?>
 			</tbody>
 		</table>
+		<?php
+	}
+
+	/**
+	 * A ranked list of label => count, as bars.
+	 *
+	 * @param array  $rows  label => n
+	 * @param string $empty
+	 */
+	private static function bars( array $rows, $empty ) {
+		if ( ! $rows ) {
+			echo '<p class="description">' . esc_html( $empty ) . '</p>';
+			return;
+		}
+		$max = max( 1, max( $rows ) );
+		foreach ( $rows as $label => $n ) {
+			printf(
+				'<div class="fw-vi-bar"><span class="fw-vi-bar__fill" style="width:%1$s%%"></span><span class="fw-vi-bar__label">%2$s</span><span class="fw-vi-bar__n">%3$s</span></div>',
+				esc_attr( round( 100 * $n / $max, 1 ) ),
+				esc_html( (string) $label ),
+				esc_html( number_format_i18n( $n ) )
+			);
+		}
+	}
+
+	/**
+	 * Everything about one page: traffic, where its visitors came from, what
+	 * they did, and where they went next.
+	 */
+	private function render_page_detail() {
+		global $wpdb;
+
+		$days = $this->days();
+		$pid  = isset( $_GET['pid'] ) ? absint( $_GET['pid'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$page = $pid ? FW_VI_Reports::page( $pid, $days ) : null;
+
+		if ( ! $page ) {
+			echo '<div class="fw-vi-empty"><h2>' . esc_html__( 'Page not found', 'fw' ) . '</h2><p><a href="' . esc_url( self::url( 'pages' ) ) . '">' . esc_html__( 'Back to Pages', 'fw' ) . '</a></p></div>';
+			return;
+		}
+
+		$ch_labels = FW_VI_Channels::labels();
+		$path      = $page->path;
+		$recs      = FW_VI_Recordings::counts_by_path();
+
+		// Where visitors came from.
+		$channels = array();
+		foreach ( FW_VI_Reports::for_page( 'chdaily', 'ch, SUM(views) n', 'GROUP BY ch ORDER BY n DESC', $pid, $days ) as $r ) {
+			$channels[ $ch_labels[ $r->ch ] ?? $r->ch ] = (int) $r->n;
+		}
+		$refs = array();
+		foreach ( FW_VI_Reports::breakdown( 'rp', $days, 10, $pid ) as $v => $n ) {
+			$refs[ 'https://' . $v ] = (int) $n;
+		}
+		foreach ( FW_VI_Reports::breakdown( 'ref', $days, 10, $pid ) as $v => $n ) {
+			$shared = 0;
+			foreach ( $refs as $u => $c ) {
+				$shared += 0 === strpos( $u, 'https://' . $v . '/' ) ? $c : 0;
+			}
+			if ( $n > $shared ) {
+				$refs[ $v . ' ' . __( '(page not shared)', 'fw' ) ] = (int) $n - $shared;
+			}
+		}
+		arsort( $refs );
+
+		$kws   = array();
+		$match = function ( $p ) use ( $path ) {
+			return untrailingslashit( (string) $p ) === untrailingslashit( $path );
+		};
+		foreach ( FW_VI_Keywords::recorded( $days ) as $r ) {
+			if ( $match( $r[1] ) ) {
+				$kws[ $r[0] ] = ( $kws[ $r[0] ] ?? 0 ) + $r[2];
+			}
+		}
+		$gsc = FW_VI_Keywords::console( $days );
+		foreach ( $gsc['rows'] as $r ) {
+			if ( $match( $r[1] ) && $r[2] > 0 ) {
+				$kws[ $r[0] ] = ( $kws[ $r[0] ] ?? 0 ) + $r[2];
+			}
+		}
+		arsort( $kws );
+		$kws = array_slice( $kws, 0, 10, true );
+
+		// Visits through this page.
+		list( $from, $to ) = FW_VI_Reports::range( $days );
+		$vt      = FW_VI_Installer::table( 'visits' );
+		$entries = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$vt} WHERE entry = %d AND day BETWEEN %s AND %s", $pid, $from, $to ) ); // phpcs:ignore WordPress.DB
+		$bounces = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$vt} WHERE entry = %d AND pages = 1 AND day BETWEEN %s AND %s", $pid, $from, $to ) ); // phpcs:ignore WordPress.DB
+		$exits   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$vt} WHERE exit_page = %d AND day BETWEEN %s AND %s", $pid, $from, $to ) ); // phpcs:ignore WordPress.DB
+		$flow    = FW_VI_Visits::next_pages( $pid, $days );
+
+		$outbound = array();
+		foreach ( FW_VI_Reports::for_page( 'outbound', 'kind, url, SUM(n) n', 'GROUP BY kind, url ORDER BY n DESC LIMIT 10', $pid, $days ) as $r ) {
+			$outbound[ ( 'd' === $r->kind ? __( 'Download:', 'fw' ) : __( 'Exit link:', 'fw' ) ) . ' ' . $r->url ] = (int) $r->n;
+		}
+		$names = wp_list_pluck( FW_VI_Goals::all(), 'name' );
+		$goals = array();
+		foreach ( FW_VI_Reports::for_page( 'goals', 'goal, SUM(n) n', 'GROUP BY goal ORDER BY n DESC', $pid, $days ) as $r ) {
+			$goals[ $names[ $r->goal ] ?? $r->goal ] = (int) $r->n;
+		}
+		$forms = FW_VI_Reports::for_page( 'forms', 'form, MAX(label) label, SUM(starts) starts, SUM(submits) submits, SUM(abandons) abandons', 'GROUP BY form ORDER BY starts DESC', $pid, $days );
+
+		$devices = array();
+		$dn      = array( 'd' => __( 'Desktop', 'fw' ), 't' => __( 'Tablet', 'fw' ), 'm' => __( 'Mobile', 'fw' ) );
+		foreach ( FW_VI_Reports::breakdown( 'dev', $days, 3, $pid ) as $k => $n ) {
+			$devices[ $dn[ $k ] ?? $k ] = (int) $n;
+		}
+		$places = array();
+		foreach ( FW_VI_Reports::breakdown( 'ci', $days, 8, $pid ) as $k => $n ) {
+			$c = explode( '|', (string) $k );
+			$places[ implode( ', ', array_filter( array( $c[2] ?? '', $c[1] ?? '', $c[0] ?? '' ) ) ) ] = (int) $n;
+		}
+		if ( ! $places ) {
+			foreach ( FW_VI_Reports::breakdown( 'cc', $days, 8, $pid ) as $k => $n ) {
+				$places[ $k ] = (int) $n;
+			}
+		}
+		?>
+		<div class="fw-vi-pagehead">
+			<code><?php echo esc_html( FW_VI_Keywords::show_path( $path ) ); ?></code>
+			<a class="button button-small" href="<?php echo esc_url( FW_VI_Reports::url( $path ) ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'Open page', 'fw' ); ?></a>
+			<a class="button button-small" href="<?php echo esc_url( self::url( 'heatmaps', array( 'path' => $path ) ) ); ?>"><?php esc_html_e( 'Heatmap', 'fw' ); ?></a>
+			<?php if ( ! empty( $recs[ $path ] ) ) : ?>
+				<a class="button button-small" href="<?php echo esc_url( self::url( 'recordings', array( 'rec_path' => $path ) ) ); ?>"><?php printf( esc_html__( 'Recordings (%d)', 'fw' ), (int) $recs[ $path ] ); ?></a>
+			<?php endif; ?>
+			<a class="button button-small" href="<?php echo esc_url( self::url( 'paths', array( 'entry' => $pid, 'days' => $days ) ) ); ?>"><?php esc_html_e( 'Visits that started here', 'fw' ); ?></a>
+			<?php if ( $page->post_id && current_user_can( 'edit_post', (int) $page->post_id ) ) : ?>
+				<a class="button button-small" href="<?php echo esc_url( (string) get_edit_post_link( (int) $page->post_id ) ); ?>"><?php esc_html_e( 'Edit page', 'fw' ); ?></a>
+			<?php endif; ?>
+		</div>
+
+		<div class="fw-vi-tiles">
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Page views', 'fw' ); ?></span><strong><?php echo esc_html( number_format_i18n( $page->views ) ); ?></strong><?php echo wp_kses_post( FW_VI_Reports::change( $page->views, $page->prev ) ); ?></div>
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Unique visitors', 'fw' ); ?></span><strong><?php echo esc_html( number_format_i18n( $page->uniques ) ); ?></strong></div>
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Avg time on page', 'fw' ); ?></span><strong><?php echo esc_html( self::duration( $page->engaged ) ); ?></strong></div>
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Read half', 'fw' ); ?></span><strong><?php echo null === $page->half ? '—' : esc_html( $page->half . '%' ); ?></strong></div>
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Entry page of', 'fw' ); ?></span><strong><?php echo esc_html( number_format_i18n( $entries ) ); ?></strong><em><?php echo $entries ? esc_html( sprintf( __( '%s%% bounced', 'fw' ), number_format_i18n( 100 * $bounces / $entries ) ) ) : esc_html__( 'visits', 'fw' ); ?></em></div>
+			<div class="fw-vi-tile"><span><?php esc_html_e( 'Exit page of', 'fw' ); ?></span><strong><?php echo esc_html( number_format_i18n( $exits ) ); ?></strong><em><?php esc_html_e( 'visits', 'fw' ); ?></em></div>
+		</div>
+
+		<div class="fw-vi-card"><?php self::chart( FW_VI_Reports::series( $days, $pid ) ); ?></div>
+
+		<h2 class="fw-vi-section"><?php esc_html_e( 'How visitors found this page', 'fw' ); ?></h2>
+		<div class="fw-vi-grid">
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Channels', 'fw' ); ?></h2><?php self::bars( $channels, __( 'No visits in this period.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Keywords', 'fw' ); ?></h2><?php self::bars( $kws, FW_VI_Keywords::console_ready() ? __( 'No search terms for this page in this period.', 'fw' ) : __( 'None recorded. Connect Search Console (SEO → Search Console) to see the search terms for this page.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Referring pages', 'fw' ); ?></h2><?php self::bars( $refs, __( 'No other site sent visitors here in this period.', 'fw' ) ); ?></div>
+		</div>
+
+		<h2 class="fw-vi-section"><?php esc_html_e( 'How visitors move through it', 'fw' ); ?></h2>
+		<div class="fw-vi-grid fw-vi-grid--2">
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Came from', 'fw' ); ?></h2><?php self::bars( array_slice( $flow['prev'], 0, 10, true ), __( 'No visits through this page in the visit log yet.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Went next', 'fw' ); ?></h2><?php self::bars( array_slice( $flow['next'], 0, 10, true ), __( 'No visits through this page in the visit log yet.', 'fw' ) ); ?></div>
+		</div>
+
+		<h2 class="fw-vi-section"><?php esc_html_e( 'What they did', 'fw' ); ?></h2>
+		<div class="fw-vi-grid">
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Goals completed here', 'fw' ); ?></h2><?php self::bars( $goals, __( 'No goals completed on this page in this period.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Exit links and downloads', 'fw' ); ?></h2><?php self::bars( $outbound, __( 'Nobody left this page by a link or a download in this period.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card">
+				<h2><?php esc_html_e( 'Forms', 'fw' ); ?></h2>
+				<?php if ( ! $forms ) : ?>
+					<p class="description"><?php esc_html_e( 'No form activity on this page in this period.', 'fw' ); ?></p>
+				<?php else : ?>
+					<table class="widefat striped fw-vi-table">
+						<thead><tr><th><?php esc_html_e( 'Form', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Started', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Sent', 'fw' ); ?></th><th class="num"><?php esc_html_e( 'Gave up', 'fw' ); ?></th></tr></thead>
+						<tbody>
+						<?php foreach ( $forms as $f ) : ?>
+							<tr><td><?php echo esc_html( '' !== (string) $f->label ? $f->label : $f->form ); ?></td><td class="num"><?php echo esc_html( number_format_i18n( $f->starts ) ); ?></td><td class="num"><?php echo esc_html( number_format_i18n( $f->submits ) ); ?></td><td class="num"><?php echo esc_html( number_format_i18n( $f->abandons ) ); ?></td></tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+			</div>
+		</div>
+
+		<h2 class="fw-vi-section"><?php esc_html_e( 'Who visited', 'fw' ); ?></h2>
+		<div class="fw-vi-grid fw-vi-grid--2">
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Devices', 'fw' ); ?></h2><?php self::bars( $devices, __( 'No visits in this period.', 'fw' ) ); ?></div>
+			<div class="fw-vi-card"><h2><?php esc_html_e( 'Places', 'fw' ); ?></h2><?php self::bars( $places, __( 'No locations recorded for this page in this period.', 'fw' ) ); ?></div>
+		</div>
 		<?php
 	}
 
