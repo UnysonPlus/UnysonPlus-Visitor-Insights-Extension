@@ -47,6 +47,19 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		require_once $dir . 'class-fw-vi-funnels.php';
 		require_once $dir . 'class-fw-vi-errors.php';
 		require_once $dir . 'class-fw-vi-vitals.php';
+		require_once $dir . 'class-fw-vi-form-analytics.php';
+		require_once $dir . 'class-fw-vi-search.php';
+		require_once $dir . 'class-fw-vi-experiments.php';
+		require_once $dir . 'class-fw-vi-digest.php';
+		require_once $dir . 'class-fw-vi-ai.php';
+		require_once $dir . 'class-fw-vi-recordings.php';
+		require_once $dir . 'class-fw-vi-channels.php';
+		require_once $dir . 'class-fw-vi-cache.php';
+		require_once $dir . 'class-fw-vi-dashboard.php';
+		require_once $dir . 'class-fw-vi-export.php';
+		require_once $dir . 'class-fw-vi-annotations.php';
+		require_once $dir . 'class-fw-vi-segments.php';
+		require_once $dir . 'class-fw-vi-alerts.php';
 
 		FW_VI_Installer::maybe_install();
 
@@ -63,9 +76,21 @@ class FW_Extension_Visitor_Insights extends FW_Extension {
 		new FW_VI_Goals();
 		new FW_VI_Integrations();
 		new FW_VI_Errors();
+		new FW_VI_Search();
+		new FW_VI_Experiments();
+		new FW_VI_Digest();
+		new FW_VI_AI();
+		new FW_VI_Recordings( $this );
+		new FW_VI_Alerts();
 
 		if ( is_admin() ) {
 			require_once $dir . 'class-fw-vi-admin-page.php';
+			require_once $dir . 'class-fw-vi-app.php';
+			require_once $dir . 'class-fw-vi-transfer.php';
+
+			new FW_VI_Dashboard();
+			new FW_VI_Export();
+			new FW_VI_Transfer();
 
 			new FW_VI_Admin_Page( $this );
 		}

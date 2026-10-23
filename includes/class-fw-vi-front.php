@@ -90,7 +90,7 @@ class FW_VI_Front {
 			return '';
 		}
 
-		if ( is_user_logged_in() && current_user_can( 'edit_posts' ) && ! $s['track_editors'] ) {
+		if ( FW_VI_Settings::skip_current_user() ) {
 			return '';
 		}
 
@@ -114,6 +114,27 @@ class FW_VI_Front {
 		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '/'; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
 		$path = '/' . ltrim( preg_replace( '#/{2,}#', '/', $path ), '/' );
+
+		// The query string is dropped (it can carry anything), except what
+		// identifies the page itself: the post on a site without pretty
+		// permalinks, and a search — whose terms are not kept here, so every
+		// search results page is one page, "?s=".
+		$args = array();
+		parse_str( (string) wp_parse_url( $uri, PHP_URL_QUERY ), $q );
+
+		foreach ( array( 'p', 'page_id', 'cat', 'tag', 'author', 'post_type', 'product' ) as $k ) {
+			if ( isset( $q[ $k ] ) && is_scalar( $q[ $k ] ) && preg_match( '/^[A-Za-z0-9_-]{1,40}$/', (string) $q[ $k ] ) ) {
+				$args[] = $k . '=' . $q[ $k ];
+			}
+		}
+
+		if ( isset( $q['s'] ) ) {
+			$args[] = 's=';
+		}
+
+		if ( $args ) {
+			$path .= '?' . implode( '&', $args );
+		}
 
 		return substr( preg_replace( '/[^\x21-\x7e]/', '', $path ), 0, 191 );
 	}
@@ -156,10 +177,24 @@ class FW_VI_Front {
 			'frustration' => (bool) $s['track_frustration'],
 			'errors'      => (bool) $s['track_errors'],
 			'vitals'      => (bool) $s['track_vitals'],
+			'forms'       => (bool) $s['track_forms'],
+			'moves'       => (bool) $s['track_moves'],
 		);
 
 		if ( $mods['frustration'] || $mods['errors'] ) {
 			wp_enqueue_script( 'fw-vi-frustration', $this->ext->get_uri( '/static/js/modules/frustration.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
+
+		if ( $mods['forms'] ) {
+			wp_enqueue_script( 'fw-vi-forms', $this->ext->get_uri( '/static/js/modules/forms.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
+
+		if ( $mods['moves'] ) {
+			wp_enqueue_script( 'fw-vi-moves', $this->ext->get_uri( '/static/js/modules/moves.js' ), array( 'fw-vi-core' ), $ver, $args );
+		}
+
+		if ( FW_VI_Experiments::here() ) {
+			wp_enqueue_script( 'fw-vi-experiments', $this->ext->get_uri( '/static/js/modules/experiments.js' ), array( 'fw-vi-core' ), $ver, $args );
 		}
 
 		if ( $mods['vitals'] ) {
@@ -184,7 +219,7 @@ class FW_VI_Front {
 	 * @internal
 	 */
 	public function _filter_ao_exclude( $handles ) {
-		return array_merge( (array) $handles, array( 'fw-vi-core', 'fw-vi-heatmaps', 'fw-vi-sections', 'fw-vi-goals', 'fw-vi-frustration', 'fw-vi-vitals', 'fw-vi-viewer', 'fw-vi-simpleheat' ) );
+		return array_merge( (array) $handles, array( 'fw-vi-core', 'fw-vi-heatmaps', 'fw-vi-sections', 'fw-vi-goals', 'fw-vi-frustration', 'fw-vi-vitals', 'fw-vi-forms', 'fw-vi-experiments', 'fw-vi-recorder', 'fw-vi-moves', 'fw-vi-viewer', 'fw-vi-simpleheat' ) );
 	}
 
 	/**

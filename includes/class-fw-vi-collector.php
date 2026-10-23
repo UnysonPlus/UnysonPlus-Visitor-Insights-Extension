@@ -241,7 +241,7 @@ class FW_VI_Collector {
 		$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 
 		if ( ! $s['enabled'] || FW_VI_Bot_Filter::is_bot( $ua )
-			|| ( is_user_logged_in() && current_user_can( 'edit_posts' ) && ! $s['track_editors'] )
+			|| FW_VI_Settings::skip_current_user()
 			|| ( $s['honor_gpc'] && isset( $_SERVER['HTTP_SEC_GPC'] ) && '1' === $_SERVER['HTTP_SEC_GPC'] ) ) {
 			return false;
 		}

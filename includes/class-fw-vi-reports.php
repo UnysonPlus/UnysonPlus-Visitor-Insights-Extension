@@ -25,9 +25,33 @@ class FW_VI_Reports {
 	 * @return array views, uniques, engaged (avg seconds per view), pages
 	 */
 	public static function totals( $days ) {
+		list( $from, $to ) = self::range( $days );
+
+		return self::totals_between( $from, $to );
+	}
+
+	/**
+	 * The period of the same length just before range( $days ).
+	 *
+	 * @param int $days
+	 *
+	 * @return array [from, to]
+	 */
+	public static function previous_range( $days ) {
+		$days = max( 1, (int) $days );
+
+		return array( wp_date( 'Y-m-d', time() - ( 2 * $days - 1 ) * DAY_IN_SECONDS ), wp_date( 'Y-m-d', time() - $days * DAY_IN_SECONDS ) );
+	}
+
+	/**
+	 * @param string $from Y-m-d
+	 * @param string $to   Y-m-d
+	 *
+	 * @return array views, uniques, engaged, pages
+	 */
+	public static function totals_between( $from, $to ) {
 		global $wpdb;
 
-		list( $from, $to ) = self::range( $days );
 		$t = FW_VI_Installer::table( 'views' );
 
 		$row = $wpdb->get_row( $wpdb->prepare( "SELECT COALESCE(SUM(views),0) v, COALESCE(SUM(uniques),0) u, COALESCE(SUM(engaged_ms),0) e FROM {$t} WHERE page_id = 0 AND day BETWEEN %s AND %s", $from, $to ) ); // phpcs:ignore WordPress.DB
@@ -97,6 +121,8 @@ class FW_VI_Reports {
 		}
 
 		$ids  = implode( ',', array_map( 'intval', wp_list_pluck( $rows, 'id' ) ) );
+		list( $pf, $pt ) = self::previous_range( $days );
+		$prev = $wpdb->get_results( $wpdb->prepare( "SELECT page_id, SUM(views) v FROM {$v} WHERE page_id IN ({$ids}) AND day BETWEEN %s AND %s GROUP BY page_id", $pf, $pt ), OBJECT_K ); // phpcs:ignore WordPress.DB
 		$half = $wpdb->get_results( $wpdb->prepare( "SELECT page_id, SUM(n) n FROM {$s} WHERE page_id IN ({$ids}) AND band = 50 AND day BETWEEN %s AND %s GROUP BY page_id", $from, $to ), OBJECT_K ); // phpcs:ignore WordPress.DB
 
 		foreach ( $rows as $r ) {
@@ -105,6 +131,7 @@ class FW_VI_Reports {
 			$r->engaged = $r->views ? round( $r->engaged / $r->views / 1000, 1 ) : 0;
 			$r->half    = $r->views && isset( $half[ $r->id ] ) ? min( 100, round( 100 * $half[ $r->id ]->n / $r->views ) ) : null;
 			$r->title   = $r->post_id ? get_the_title( (int) $r->post_id ) : '';
+			$r->prev    = isset( $prev[ $r->id ] ) ? (int) $prev[ $r->id ]->v : 0;
 		}
 
 		return $rows;
@@ -160,6 +187,28 @@ class FW_VI_Reports {
 			),
 			'at'       => time(),
 		);
+	}
+
+	/**
+	 * "+12%" / "−8%" / "new" against a previous value, as HTML.
+	 *
+	 * @param float $now
+	 * @param float $before
+	 *
+	 * @return string
+	 */
+	public static function change( $now, $before ) {
+		if ( ! $before ) {
+			return $now ? '<span class="fw-vi-delta is-up">' . esc_html__( 'new', 'fw' ) . '</span>' : '';
+		}
+
+		$d = 100 * ( $now - $before ) / $before;
+
+		if ( abs( $d ) < 0.5 ) {
+			return '<span class="fw-vi-delta">±0%</span>';
+		}
+
+		return sprintf( '<span class="fw-vi-delta %s">%s%s%%</span>', $d > 0 ? 'is-up' : 'is-down', $d > 0 ? '+' : '−', esc_html( number_format_i18n( abs( $d ), 0 ) ) );
 	}
 
 	/**

@@ -8,7 +8,7 @@
  * thank-you step is a redirect, an AJAX response or another page.
  *
  *   form_submit        Forms extension        fw_ext_forms_frontend_submit
- *   newsletter_signup  Newsletter CRM         unysonplus_newsletter_crm_subscriber_added
+ *   newsletter_signup  CRM         unysonplus_crm_subscriber_added
  *   woo_order          WooCommerce            woocommerce_checkout_order_processed
  *                                             woocommerce_store_api_checkout_order_processed
  *                                             (value = order total, in cents)
@@ -22,7 +22,7 @@ class FW_VI_Integrations {
 
 	public function __construct() {
 		add_action( 'fw_ext_forms_frontend_submit', array( $this, '_form' ) );
-		add_action( 'unysonplus_newsletter_crm_subscriber_added', array( $this, '_newsletter' ), 10, 2 );
+		add_action( 'unysonplus_crm_subscriber_added', array( $this, '_newsletter' ), 10, 2 );
 		add_action( 'woocommerce_checkout_order_processed', array( $this, '_order' ), 10, 1 );
 		add_action( 'woocommerce_store_api_checkout_order_processed', array( $this, '_order' ), 10, 1 );
 		add_action( 'fw_ext_short_links_click', array( $this, '_short_link' ), 10, 1 );
@@ -40,7 +40,7 @@ class FW_VI_Integrations {
 		if ( $ext( 'forms' ) ) {
 			$out['form_submit'] = __( 'Form submitted', 'fw' );
 		}
-		if ( $ext( 'newsletter-crm' ) ) {
+		if ( $ext( 'crm' ) ) {
 			$out['newsletter_signup'] = __( 'Newsletter sign-up', 'fw' );
 		}
 		if ( class_exists( 'WooCommerce' ) ) {

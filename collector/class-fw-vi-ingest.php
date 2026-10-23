@@ -144,7 +144,7 @@ class FW_VI_Ingest {
 	 * Accept the token for today and the previous days (UTC), so a page served
 	 * from a cache built last week still reports.
 	 */
-	private static function token_ok( $secret, $pid, $path, $tok ) {
+	public static function token_ok( $secret, $pid, $path, $tok ) {
 		for ( $i = 0; $i < self::TOKEN_DAYS; $i++ ) {
 			if ( hash_equals( self::token( $secret, $pid, $path, gmdate( 'Ymd', time() - $i * 86400 ) ), $tok ) ) {
 				return true;
@@ -169,6 +169,8 @@ class FW_VI_Ingest {
 		$goals  = 0;
 		$errors = 0;
 		$vitals = array();
+		$forms  = 0;
+		$moves  = 0;
 
 		foreach ( array_slice( $raw, 0, self::MAX_EVENTS ) as $e ) {
 			if ( ! is_array( $e ) || ! isset( $e[0] ) || ! is_string( $e[0] ) ) {
@@ -239,6 +241,47 @@ class FW_VI_Ingest {
 							isset( $e[2] ) && is_string( $e[2] ) ? self::mask( $e[2], 150 ) : '',
 							isset( $e[3] ) && is_int( $e[3] ) ? max( 0, min( 1000000, $e[3] ) ) : 0,
 						);
+					}
+					break;
+
+				case 'fs': // form started: [fs, form, label]
+				case 'fc': // form submitted: [fc, form]
+				case 'fa': // form abandoned: [fa, form, last field]
+				case 'ff': // field focused first time: [ff, form, field, position]
+					$form = isset( $e[1] ) && is_string( $e[1] ) ? $e[1] : '';
+					if ( ! preg_match( '/^[A-Za-z0-9_.:-]{1,40}$/', $form ) || ++$forms > 60 ) {
+						break;
+					}
+					if ( 'fs' === $e[0] ) {
+						$out[] = array( 'fs', $form, isset( $e[2] ) && is_string( $e[2] ) ? self::mask( $e[2], 100 ) : '' );
+					} elseif ( 'fc' === $e[0] ) {
+						$out[] = array( 'fc', $form );
+					} else {
+						$field = isset( $e[2] ) && is_string( $e[2] ) ? $e[2] : '';
+						if ( preg_match( '/^[A-Za-z0-9_.:\[\]-]{1,40}$/', $field ) ) {
+							$out[] = 'ff' === $e[0]
+								? array( 'ff', $form, $field, isset( $e[3] ) && is_int( $e[3] ) ? max( 0, min( 500, $e[3] ) ) : 0 )
+								: array( 'fa', $form, $field );
+						}
+					}
+					break;
+
+				case 'm': // pointer movement bin: [m, item|'', a, b, n]
+					$item = isset( $e[1] ) && is_string( $e[1] ) ? $e[1] : '';
+					$a    = isset( $e[2] ) && is_int( $e[2] ) ? $e[2] : -1;
+					$b    = isset( $e[3] ) && is_int( $e[3] ) ? $e[3] : -1;
+					$n    = isset( $e[4] ) && is_int( $e[4] ) ? $e[4] : 0;
+					if ( ++$moves > 200 || $n < 1 || $n > 400 ) {
+						break;
+					}
+					if ( '' !== $item ? ( preg_match( $id, $item ) && $a >= 0 && $a <= 9 && $b >= 0 && $b <= 9 ) : ( $a >= 0 && $a <= 100 && $b >= 0 && $b <= 5000 ) ) {
+						$out[] = array( 'm', $item, $a, $b, $n );
+					}
+					break;
+
+				case 'e': // experiment exposure: [e, experiment, a|b]
+					if ( isset( $e[1], $e[2] ) && is_string( $e[1] ) && preg_match( '/^[a-z0-9-]{1,20}$/', $e[1] ) && in_array( $e[2], array( 'a', 'b' ), true ) ) {
+						$out[] = array( 'e', $e[1], $e[2] );
 					}
 					break;
 

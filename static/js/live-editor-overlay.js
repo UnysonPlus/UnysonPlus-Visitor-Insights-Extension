@@ -46,6 +46,8 @@
 			framed: false,
 			embedded: true,
 			l10n: C.l10n,
+			channels: C.channels,
+			h2c: C.h2c,
 			onClose: function () {
 				btn.style.display = 'flex';
 			}

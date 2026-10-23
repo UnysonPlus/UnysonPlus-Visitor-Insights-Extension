@@ -39,7 +39,7 @@
 		var frame = stage.querySelector('iframe');
 		var info = hm.querySelector('.fw-vi-hm__info');
 		var table = hm.querySelector('.fw-vi-hm__table');
-		var st = { mode: hm.getAttribute('data-mode') || 'clicks', device: 'd', days: 30 };
+		var st = { mode: hm.getAttribute('data-mode') || 'clicks', device: 'd', days: 30, ch: '' };
 
 		[].forEach.call(hm.querySelectorAll('.fw-vi-seg[data-name="mode"] button'), function (b) {
 			b.classList.toggle('is-active', b.getAttribute('data-value') === st.mode);
@@ -60,7 +60,7 @@
 
 		function show() {
 			if (ready && frame.contentWindow) {
-				frame.contentWindow.postMessage({ type: 'upvi:show', mode: st.mode, device: st.device, days: st.days }, w.location.origin);
+				frame.contentWindow.postMessage({ type: 'upvi:show', mode: st.mode, device: st.device, days: st.days, ch: st.ch }, w.location.origin);
 			}
 		}
 
@@ -84,8 +84,45 @@
 			show();
 		});
 
+		hm.querySelector('[data-name="ch"]').addEventListener('change', function (e) {
+			st.ch = e.target.value;
+			show();
+		});
+
+		var exp = hm.querySelector('[data-export]');
+		if (exp) {
+			exp.addEventListener('click', function () {
+				if (ready && frame.contentWindow) {
+					exp.disabled = true;
+					frame.contentWindow.postMessage({ type: 'upvi:export' }, w.location.origin);
+					w.setTimeout(function () {
+						exp.disabled = false;
+					}, 8000);
+				}
+			});
+		}
+
 		w.addEventListener('message', function (e) {
 			if (e.origin !== w.location.origin || !e.data || e.source !== frame.contentWindow) {
+				return;
+			}
+
+			if (e.data.type === 'upvi:image' && e.data.blob) {
+				var link = hm.querySelector('.fw-vi-hm__save') || d.createElement('a');
+				if (link.href) {
+					w.URL.revokeObjectURL(link.href);
+				}
+				link.className = 'button button-primary fw-vi-hm__save';
+				link.href = w.URL.createObjectURL(e.data.blob);
+				link.download = e.data.name;
+				link.textContent = L.saveImage + ' (' + Math.round(e.data.blob.size / 1024) + ' KB)';
+				if (!link.parentNode) {
+					hm.querySelector('[data-export]').insertAdjacentElement('afterend', link);
+				}
+				if (exp) {
+					exp.disabled = false;
+				}
+				link.click();
 				return;
 			}
 

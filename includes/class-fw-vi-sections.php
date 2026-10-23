@@ -61,6 +61,76 @@ class FW_VI_Sections {
 	}
 
 	/**
+	 * Every builder item of a post, read from its builder data:
+	 * unique_id => { type, label, section (bool, top level), parent_section }.
+	 * The label is the item's own text (title, heading, label, text …) or, for
+	 * a section, the first such text inside it — so reports and the AI can say
+	 * "the Pricing section" instead of an id.
+	 *
+	 * @param int $post_id
+	 *
+	 * @return array
+	 */
+	public static function items_of( $post_id ) {
+		static $cache = array();
+
+		if ( isset( $cache[ $post_id ] ) ) {
+			return $cache[ $post_id ];
+		}
+
+		$json  = get_post_meta( $post_id, 'fw:opt:ext:pb:page-builder:json', true );
+		$tree  = is_string( $json ) ? json_decode( $json, true ) : null;
+		$items = array();
+
+		$text = function ( $atts ) {
+			foreach ( array( 'title', 'heading', 'label', 'text', 'button_text', 'content', 'subtitle' ) as $k ) {
+				if ( isset( $atts[ $k ] ) && is_string( $atts[ $k ] ) ) {
+					$t = trim( preg_replace( '/\s+/', ' ', html_entity_decode( wp_strip_all_tags( $atts[ $k ] ), ENT_QUOTES, 'UTF-8' ) ) );
+					if ( '' !== $t ) {
+						return mb_substr( $t, 0, 70 );
+					}
+				}
+			}
+			return '';
+		};
+
+		$walk = function ( $list, $section, $depth ) use ( &$walk, &$items, $text ) {
+			$first = '';
+			foreach ( (array) $list as $it ) {
+				if ( ! is_array( $it ) ) {
+					continue;
+				}
+				$atts  = isset( $it['atts'] ) && is_array( $it['atts'] ) ? $it['atts'] : array();
+				$id    = isset( $atts['unique_id'] ) ? (string) $atts['unique_id'] : '';
+				$type  = (string) ( $it['shortcode'] ?? $it['type'] ?? '' );
+				$is_s  = 'section' === ( $it['type'] ?? '' ) && 0 === $depth;
+				$own   = $text( $atts );
+				$inner = ! empty( $it['_items'] ) ? $walk( $it['_items'], $is_s ? $id : $section, $depth + 1 ) : '';
+
+				if ( '' !== $id ) {
+					$items[ $id ] = array(
+						'type'    => $type,
+						'label'   => '' !== $own ? $own : $inner,
+						'section' => $is_s,
+						'parent'  => $is_s ? '' : $section,
+					);
+				}
+
+				if ( '' === $first ) {
+					$first = '' !== $own ? $own : $inner;
+				}
+			}
+			return $first;
+		};
+
+		if ( is_array( $tree ) ) {
+			$walk( $tree, '', 0 );
+		}
+
+		return $cache[ $post_id ] = $items;
+	}
+
+	/**
 	 * Per builder item of a post, all devices, the last 30 days:
 	 * [ share of the page's clicks in %, reach in % (sections) or null ].
 	 *
@@ -159,6 +229,8 @@ class FW_VI_Sections {
 			'label'      => __( 'Heatmap', 'fw' ),
 			'title'      => __( 'Show this page\'s Visitor Insights heatmap', 'fw' ),
 			'l10n'       => FW_VI_Heatmaps::l10n(),
+			'channels'   => FW_VI_Heatmaps::channel_choices(),
+			'h2c'        => $this->ext->get_uri( '/static/js/vendor/html2canvas.min.js' ) . '?ver=2.4.5',
 		) );
 	}
 }

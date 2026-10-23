@@ -33,6 +33,11 @@ class FW_VI_Privacy {
 			. '<p>' . esc_html__( 'If your browser sends the Global Privacy Control signal, or you have declined statistics in our cookie banner, you are not counted. You can also opt out at any time on this page.', 'fw' ) . '</p>'
 			. '<p class="privacy-policy-tutorial">' . esc_html__( 'Place the [visitor_insights_optout] shortcode next to the last sentence so visitors can opt out.', 'fw' ) . '</p>';
 
+		if ( FW_VI_Settings::get()['recording'] ) {
+			$text .= '<p>' . esc_html__( 'If you agree to it in our cookie banner, we may record your visit — how the pages moved and where you clicked and scrolled — to find and fix problems on the site. What you type into forms is never recorded: it is hidden in your browser before anything is sent. Recordings stay on our own server, are seen only by our site administrators and are deleted automatically after a few weeks. You can withdraw your consent at any time, which stops the recording and deletes it, or delete it yourself with the button on this page.', 'fw' ) . '</p>'
+				. '<p class="privacy-policy-tutorial">' . esc_html__( 'Place the [visitor_insights_recording] shortcode next to this paragraph so visitors can delete their own recording.', 'fw' ) . '</p>';
+		}
+
 		wp_add_privacy_policy_content( __( 'Unyson+ Visitor Insights', 'fw' ), wp_kses_post( $text ) );
 	}
 }

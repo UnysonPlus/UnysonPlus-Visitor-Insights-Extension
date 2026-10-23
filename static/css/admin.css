@@ -88,3 +88,40 @@
 .fw-vi-chip.is-good { background: #edfaef; color: #00701a; }
 .fw-vi-chip.is-ni { background: #fcf9e8; color: #8a6100; }
 .fw-vi-chip.is-poor { background: #fcf0f1; color: #b32d2e; }
+
+/* Phase 3 — forms, search, experiments */
+.fw-vi-formcard h2 small { font-weight: 400; margin-left: 6px; }
+.fw-vi-funnel-mini { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 0 0 12px; }
+.fw-vi-funnel-mini div { background: #f6f7f7; border-radius: 6px; padding: 10px 12px; }
+.fw-vi-funnel-mini strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.fw-vi-funnel-mini span { color: var(--vi-muted); font-size: 12px; }
+.fw-vi-callout { background: #fcf9e8; border-left: 4px solid #dba617; padding: 8px 12px; margin: 0 0 12px; }
+.fw-vi-hot td { background: #fcf9e8 !important; }
+.fw-vi-grid--2 { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+.fw-vi-bar__fill--warn { background: #f5d9a8; }
+.fw-vi-muted { color: var(--vi-muted); font-style: normal; }
+.fw-vi-exp h2 .fw-vi-chip { font-size: 11px; vertical-align: middle; margin-left: 6px; }
+.fw-vi-exp .fw-vi-win td { background: #edfaef; }
+.fw-vi-verdict { font-weight: 600; margin: 12px 0; }
+.fw-vi-exp__actions { display: flex; gap: 16px; align-items: center; }
+.fw-vi-exp__actions form { display: flex; gap: 8px; align-items: center; }
+
+/* Phase 5 */
+.fw-vi-export { color: var(--vi-muted); margin: 0 0 20px; }
+.fw-vi-export .dashicons { vertical-align: -3px; }
+
+/* Phase 6 */
+.fw-vi-delta { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 600; color: var(--vi-muted); }
+.fw-vi-tile .fw-vi-delta { margin: 4px 0 0; display: block; }
+.fw-vi-delta.is-up { color: #00a32a; }
+.fw-vi-delta.is-down { color: #d63638; }
+.fw-vi-compare-note { margin: -12px 0 16px; color: var(--vi-muted); font-size: 12px; }
+.fw-vi-chart__note line { stroke: #dba617; stroke-width: 2; stroke-dasharray: 4 3; }
+.fw-vi-chart__note circle { fill: #dba617; }
+.fw-vi-notes summary { cursor: pointer; }
+.fw-vi-notes ul { margin: 12px 0; }
+.fw-vi-notes li { display: flex; gap: 8px; align-items: center; }
+.fw-vi-note-dot { width: 8px; height: 8px; border-radius: 50%; background: #dba617; display: inline-block; }
+.fw-vi-notes .fw-vi-form { margin-top: 12px; }
+.fw-vi-filter { margin: 0 0 12px; }
+.fw-vi-filter label { font-weight: 600; }

@@ -5,12 +5,13 @@
 /**
  * Unyson+ → Visitor Insights.
  *
- * Tabs: Overview (traffic), Pages, Heatmaps, Goals, Funnels, Frustration,
- * Performance, Live, Settings. House
- * conventions as Short Links: a submenu of `fw-extensions` placed through
- * `fw_unysonplus_admin_submenu_order`; actions on `load-{hook}` then a
- * redirect; native `nav-tab-wrapper` tabs; settings rendered by the options
- * framework; charts are inline SVG.
+ * One page whose `tab` picks the view, drawn inside the shared admin app
+ * frame (FW_VI_App: a grouped sidebar, a top bar, the WordPress menu folded),
+ * as SEO, the CRM and Membership are. A submenu of `fw-extensions` placed
+ * through `fw_unysonplus_admin_submenu_order` — or a top-level menu for people
+ * who may view the reports but not reach the Unyson+ menu; actions on
+ * `load-{hook}` then a redirect; settings rendered by the options framework;
+ * charts are inline SVG.
  *
  * Opening any tab first folds pending buffer files into the tables, so the
  * numbers are current even when WP-Cron is not.
@@ -53,16 +54,15 @@ class FW_VI_Admin_Page {
 			return;
 		}
 
-		$this->hook = add_submenu_page(
-			self::PARENT_SLUG,
-			__( 'Visitor Insights', 'fw' ),
-			__( 'Visitor Insights', 'fw' ),
-			(string) apply_filters( 'fw_ext_visitor_insights_view_cap', 'manage_options' ),
-			self::PAGE_SLUG,
-			array( $this, 'render_page' )
-		);
+		$cap = (string) apply_filters( 'fw_ext_visitor_insights_view_cap', 'manage_options' );
+
+		// Someone allowed the reports but not the Unyson+ menu gets a menu of their own.
+		$this->hook = current_user_can( 'manage_options' )
+			? add_submenu_page( self::PARENT_SLUG, __( 'Visitor Insights', 'fw' ), __( 'Visitor Insights', 'fw' ), $cap, self::PAGE_SLUG, array( $this, 'render_page' ) )
+			: add_menu_page( __( 'Visitor Insights', 'fw' ), __( 'Visitor Insights', 'fw' ), $cap, self::PAGE_SLUG, array( $this, 'render_page' ), 'dashicons-chart-area', 3 );
 
 		if ( $this->hook ) {
+			FW_VI_App::app()->attach( $this->hook );
 			add_action( 'load-' . $this->hook, array( $this, '_action_load' ) );
 			add_action( 'admin_enqueue_scripts', array( $this, '_action_enqueue' ) );
 		}
@@ -122,11 +122,7 @@ class FW_VI_Admin_Page {
 	private function tab() {
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'overview'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
-		if ( 'settings' === $tab && ! current_user_can( 'manage_options' ) ) {
-			return 'overview';
-		}
-
-		return in_array( $tab, array( 'overview', 'pages', 'heatmaps', 'goals', 'funnels', 'frustration', 'performance', 'live', 'settings' ), true ) ? $tab : 'overview';
+		return in_array( $tab, FW_VI_App::views(), true ) ? $tab : 'overview';
 	}
 
 	/**
@@ -153,6 +149,10 @@ class FW_VI_Admin_Page {
 		}
 
 		wp_enqueue_style( 'fw-vi-admin', $this->ext->get_uri( '/static/css/admin.css' ), array(), $ver );
+
+		if ( 'recordings' === $this->tab() && isset( $_GET['sid'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			FW_VI_Recordings::enqueue_player( $this->ext );
+		}
 		wp_enqueue_script( 'fw-vi-admin', $this->ext->get_uri( '/static/js/admin/admin.js' ), array(), $ver, true );
 		wp_localize_script( 'fw-vi-admin', 'UPVIA', array(
 			'live'  => esc_url_raw( rest_url( FW_VI_REST::NS . '/live' ) ),
@@ -167,6 +167,7 @@ class FW_VI_Admin_Page {
 				'noSection' => __( 'This page has no builder sections.', 'fw' ),
 				'visitors'  => __( 'page views in the last 5 minutes', 'fw' ),
 				'quiet'     => __( 'Nobody right now.', 'fw' ),
+				'saveImage' => __( 'Save image', 'fw' ),
 			),
 		) );
 	}
@@ -190,13 +191,22 @@ class FW_VI_Admin_Page {
 		check_admin_referer( self::NONCE );
 
 		// Goals and funnels own their actions; each returns its notice.
-		foreach ( array( 'goals' => array( 'FW_VI_Goals', 'handle' ), 'funnels' => array( 'FW_VI_Funnels', 'handle' ) ) as $tab => $handler ) {
+		foreach ( array( 'goals' => array( 'FW_VI_Goals', 'handle' ), 'funnels' => array( 'FW_VI_Funnels', 'handle' ), 'experiments' => array( 'FW_VI_Experiments', 'handle' ), 'recordings' => array( 'FW_VI_Recordings', 'handle' ), 'overview' => array( 'FW_VI_Annotations', 'handle' ) ) as $tab => $handler ) {
 			$message = call_user_func( $handler, $action );
 
 			if ( null !== $message ) {
+				if ( 'experiments' === $tab ) {
+					FW_VI_Cache::purge(); // the variant CSS sits in cached pages
+				}
 				$this->notice( 'success', esc_html( $message ) );
 				$this->redirect( self::url( $tab, array( 'days' => $this->days() ) ) );
 			}
+		}
+
+		$result = FW_VI_Transfer::handle( $action );
+		if ( null !== $result ) {
+			$this->notice( $result[0], esc_html( $result[1] ) );
+			$this->redirect( self::url( 'transfer' ) );
 		}
 
 		if ( 'save_settings' === $action ) {
@@ -207,7 +217,9 @@ class FW_VI_Admin_Page {
 			FW_VI_Settings::flush();
 			FW_VI_Collector::maybe_write_config( true );
 
-			$this->notice( 'success', __( 'Settings saved. If your site uses a page cache, clear it so cached pages pick up the change.', 'fw' ) );
+			$this->notice( 'success', FW_VI_Cache::purge()
+				? __( 'Settings saved. Your page cache was cleared, so visitors get the change straight away.', 'fw' )
+				: __( 'Settings saved. If your site uses a page cache, clear it so cached pages pick up the change.', 'fw' ) );
 			$this->redirect( self::url( 'settings' ) );
 		}
 
@@ -223,10 +235,25 @@ class FW_VI_Admin_Page {
 				@unlink( $file ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions
 			}
 
+			FW_VI_Recordings::delete_all();
 			FW_VI_Installer::uninstall();
 			FW_VI_Installer::install();
 
 			$this->notice( 'success', __( 'All Visitor Insights data was removed. Collection continues from now.', 'fw' ) );
+			$this->redirect( self::url( 'settings' ) );
+		}
+
+		if ( 'alerts_check' === $action ) {
+			$found = FW_VI_Alerts::check();
+			$this->notice( $found ? 'warning' : 'success', $found
+				? esc_html__( 'Yesterday:', 'fw' ) . ' ' . esc_html( implode( ' · ', wp_list_pluck( $found, 'title' ) ) )
+				: esc_html__( 'Nothing unusual yesterday — no alert would be sent.', 'fw' ) );
+			$this->redirect( self::url( 'settings' ) );
+		}
+
+		if ( 'digest_test' === $action ) {
+			$ok = FW_VI_Digest::send( array( wp_get_current_user()->user_email ) );
+			$this->notice( $ok ? 'success' : 'error', $ok ? __( 'Test email sent to you.', 'fw' ) : __( 'The email could not be sent. Check that this site can send mail.', 'fw' ) );
 			$this->redirect( self::url( 'settings' ) );
 		}
 
@@ -255,37 +282,21 @@ class FW_VI_Admin_Page {
 			wp_die( esc_html__( 'You are not allowed to view Visitor Insights.', 'fw' ) );
 		}
 
-		$tab  = $this->tab();
-		$tabs = array(
-			'overview' => __( 'Overview', 'fw' ),
-			'pages'    => __( 'Pages', 'fw' ),
-			'heatmaps' => __( 'Heatmaps', 'fw' ),
-			'goals'       => __( 'Goals', 'fw' ),
-			'funnels'     => __( 'Funnels', 'fw' ),
-			'frustration' => __( 'Frustration', 'fw' ),
-			'performance' => __( 'Performance', 'fw' ),
-			'live'     => __( 'Live', 'fw' ),
-		);
+		$tab = $this->tab();
 
-		if ( current_user_can( 'manage_options' ) ) {
-			$tabs['settings'] = __( 'Settings', 'fw' );
+		ob_start();
+		if ( in_array( $tab, array( 'overview', 'pages', 'goals', 'funnels', 'forms', 'search', 'frustration', 'performance' ), true ) ) {
+			$this->render_range( $tab );
 		}
+
+		FW_VI_App::app()->open( $tab, array(
+			'crumbs'  => 'overview' === $tab ? array() : array( array( __( 'Visitor Insights', 'fw' ), self::url() ) ),
+			'actions' => (string) ob_get_clean(),
+			'class'   => 'fw-vi',
+		) );
+
+		$this->render_notice();
 		?>
-		<div class="wrap fw-vi">
-			<h1 class="wp-heading-inline"><?php esc_html_e( 'Visitor Insights', 'fw' ); ?></h1>
-			<?php if ( in_array( $tab, array( 'overview', 'pages', 'goals', 'funnels', 'frustration', 'performance' ), true ) ) : ?>
-				<?php $this->render_range( $tab ); ?>
-			<?php endif; ?>
-			<hr class="wp-header-end">
-
-			<?php $this->render_notice(); ?>
-
-			<h2 class="nav-tab-wrapper" style="margin:.6em 0 1.4em">
-				<?php foreach ( $tabs as $slug => $label ) : ?>
-					<a href="<?php echo esc_url( self::url( $slug ) ); ?>" class="nav-tab<?php echo $slug === $tab ? ' nav-tab-active' : ''; ?>"><?php echo esc_html( $label ); ?></a>
-				<?php endforeach; ?>
-			</h2>
-
 			<?php
 			switch ( $tab ) {
 				case 'pages':
@@ -303,6 +314,18 @@ class FW_VI_Admin_Page {
 				case 'frustration':
 					FW_VI_Errors::render( $this->days() );
 					break;
+				case 'experiments':
+					FW_VI_Experiments::render( $this->days(), array( $this, 'form_fields' ) );
+					break;
+				case 'forms':
+					FW_VI_Form_Analytics::render( $this->days() );
+					break;
+				case 'search':
+					FW_VI_Search::render( $this->days() );
+					break;
+				case 'recordings':
+					FW_VI_Recordings::render( array( $this, 'form_fields' ) );
+					break;
 				case 'performance':
 					$device = isset( $_GET['device'] ) ? sanitize_key( wp_unslash( $_GET['device'] ) ) : 'm'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 					FW_VI_Vitals::render( $this->days(), in_array( $device, array( 'd', 't', 'm' ), true ) ? $device : 'm' );
@@ -313,12 +336,14 @@ class FW_VI_Admin_Page {
 				case 'settings':
 					$this->render_settings();
 					break;
+				case 'transfer':
+					FW_VI_Transfer::render( array( $this, 'form_fields' ) );
+					break;
 				default:
 					$this->render_overview();
 			}
-			?>
-		</div>
-		<?php
+
+		FW_VI_App::app()->close();
 	}
 
 	/**
@@ -378,35 +403,45 @@ class FW_VI_Admin_Page {
 			return;
 		}
 
+		list( $pf, $pt ) = FW_VI_Reports::previous_range( $days );
+		$prev            = FW_VI_Reports::totals_between( $pf, $pt );
+
 		$tiles = array(
-			array( __( 'Page views', 'fw' ), number_format_i18n( $totals['views'] ) ),
-			array( __( 'Unique visitors', 'fw' ), number_format_i18n( $totals['uniques'] ) ),
-			array( __( 'Avg time on page', 'fw' ), self::duration( $totals['engaged'] ) ),
-			array( __( 'Pages viewed', 'fw' ), number_format_i18n( $totals['pages'] ) ),
+			array( __( 'Page views', 'fw' ), number_format_i18n( $totals['views'] ), FW_VI_Reports::change( $totals['views'], $prev['views'] ) ),
+			array( __( 'Unique visitors', 'fw' ), number_format_i18n( $totals['uniques'] ), FW_VI_Reports::change( $totals['uniques'], $prev['uniques'] ) ),
+			array( __( 'Avg time on page', 'fw' ), self::duration( $totals['engaged'] ), FW_VI_Reports::change( $totals['engaged'], $prev['engaged'] ) ),
+			array( __( 'Pages viewed', 'fw' ), number_format_i18n( $totals['pages'] ), FW_VI_Reports::change( $totals['pages'], $prev['pages'] ) ),
 		);
 
 		$conv = array_sum( wp_list_pluck( FW_VI_Goals::totals( $days ), 'n' ) );
 		if ( $conv ) {
-			$tiles[] = array( __( 'Goal completions', 'fw' ), number_format_i18n( $conv ) );
+			global $wpdb;
+			$pconv   = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COALESCE(SUM(n),0) FROM ' . FW_VI_Installer::table( 'goals' ) . ' WHERE day BETWEEN %s AND %s', $pf, $pt ) ); // phpcs:ignore WordPress.DB
+			$tiles[] = array( __( 'Goal completions', 'fw' ), number_format_i18n( $conv ), FW_VI_Reports::change( $conv, $pconv ) );
 		}
 		?>
 		<div class="fw-vi-tiles">
 			<?php foreach ( $tiles as $t ) : ?>
-				<div class="fw-vi-tile"><span><?php echo esc_html( $t[0] ); ?></span><strong><?php echo esc_html( $t[1] ); ?></strong></div>
+				<div class="fw-vi-tile"><span><?php echo esc_html( $t[0] ); ?></span><strong><?php echo esc_html( $t[1] ); ?></strong><?php echo isset( $t[2] ) ? wp_kses_post( $t[2] ) : ''; ?></div>
 			<?php endforeach; ?>
 		</div>
+		<p class="fw-vi-compare-note"><?php echo esc_html( sprintf( __( 'Changes compare with the %d days before.', 'fw' ), $days ) ); ?></p>
 
-		<div class="fw-vi-card"><?php self::chart( FW_VI_Reports::series( $days ) ); ?></div>
+		<div class="fw-vi-card"><?php self::chart( FW_VI_Reports::series( $days ), FW_VI_Annotations::in_range( $days ) ); ?></div>
+		<?php FW_VI_Annotations::render_form( $days, array( $this, 'form_fields' ) ); ?>
+		<?php FW_VI_Segments::render( $days ); ?>
 
 		<div class="fw-vi-card">
 			<h2><?php esc_html_e( 'Top pages', 'fw' ); ?></h2>
 			<?php $this->pages_table( FW_VI_Reports::top_pages( $days, 10 ) ); ?>
 			<p><a href="<?php echo esc_url( self::url( 'pages', array( 'days' => $days ) ) ); ?>"><?php esc_html_e( 'All pages →', 'fw' ); ?></a></p>
 		</div>
+		<?php FW_VI_Export::buttons( $days ); ?>
 
 		<div class="fw-vi-grid">
 			<?php
 			$labels = array(
+				'ch'  => __( 'Channels', 'fw' ),
 				'ref' => __( 'Referrers', 'fw' ),
 				'us'  => __( 'Campaign sources', 'fw' ),
 				'uc'  => __( 'Campaigns', 'fw' ),
@@ -421,7 +456,7 @@ class FW_VI_Admin_Page {
 			foreach ( $labels as $dim => $label ) {
 				$rows = FW_VI_Reports::breakdown( $dim, $days, 8 );
 
-				if ( ! $rows && in_array( $dim, array( 'us', 'uc', 'um', 'cc' ), true ) ) {
+				if ( ! $rows && in_array( $dim, array( 'ch', 'us', 'uc', 'um', 'cc' ), true ) ) {
 					continue;
 				}
 
@@ -434,6 +469,7 @@ class FW_VI_Admin_Page {
 
 				foreach ( $rows as $val => $n ) {
 					$name = 'dev' === $dim && isset( $names[ $val ] ) ? $names[ $val ] : $val;
+					$name = 'ch' === $dim ? ( FW_VI_Channels::labels()[ $val ] ?? $val ) : $name;
 					printf(
 						'<div class="fw-vi-bar"><span class="fw-vi-bar__fill" style="width:%1$s%%"></span><span class="fw-vi-bar__label">%2$s</span><span class="fw-vi-bar__n">%3$s</span></div>',
 						esc_attr( round( 100 * $n / $sum, 1 ) ),
@@ -450,27 +486,58 @@ class FW_VI_Admin_Page {
 
 	private function render_pages() {
 		$days = $this->days();
-		$rows = FW_VI_Reports::top_pages( $days, 200 );
+		$rows = FW_VI_Reports::top_pages( $days, 500 );
+		$ch   = isset( $_GET['ch'] ) ? sanitize_key( wp_unslash( $_GET['ch'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$ch   = isset( FW_VI_Channels::labels()[ $ch ] ) ? $ch : '';
 
 		if ( ! $rows ) {
 			$this->render_empty();
 			return;
 		}
 
+		// Channel filter: views from that channel only, pages re-ranked by them.
+		if ( '' !== $ch ) {
+			$by   = FW_VI_Segments::pages_for( $ch, $days );
+			$rows = array_values( array_filter( $rows, function ( $r ) use ( $by ) {
+				return isset( $by[ $r->id ] );
+			} ) );
+			foreach ( $rows as $r ) {
+				$r->views = (int) $by[ $r->id ];
+				unset( $r->prev );
+			}
+			usort( $rows, function ( $a, $b ) {
+				return $b->views <=> $a->views;
+			} );
+		}
+
+		echo '<form method="get" class="fw-vi-filter"><input type="hidden" name="page" value="' . esc_attr( self::PAGE_SLUG ) . '"><input type="hidden" name="tab" value="pages"><input type="hidden" name="days" value="' . (int) $days . '">';
+		echo '<label>' . esc_html__( 'Visits from', 'fw' ) . ' <select name="ch" onchange="this.form.submit()"><option value="">' . esc_html__( 'All channels', 'fw' ) . '</option>';
+		foreach ( FW_VI_Channels::labels() as $k => $label ) {
+			printf( '<option value="%s"%s>%s</option>', esc_attr( $k ), selected( $ch, $k, false ), esc_html( $label ) );
+		}
+		echo '</select></label>';
+		if ( '' !== $ch ) {
+			echo ' <span class="description">' . esc_html__( 'Views are from this channel only; the other columns are for all visits.', 'fw' ) . '</span>';
+		}
+		echo '</form>';
+
 		echo '<div class="fw-vi-card">';
 		$this->pages_table( $rows );
 		echo '</div>';
+		FW_VI_Export::buttons( $days );
 	}
 
 	/**
 	 * @param array $rows from FW_VI_Reports::top_pages()
 	 */
 	private function pages_table( array $rows ) {
+		$recs = FW_VI_Recordings::counts_by_path();
 		?>
 		<table class="widefat striped fw-vi-table">
 			<thead><tr>
 				<th><?php esc_html_e( 'Page', 'fw' ); ?></th>
 				<th class="num"><?php esc_html_e( 'Views', 'fw' ); ?></th>
+				<th class="num" title="<?php esc_attr_e( 'Against the period before', 'fw' ); ?>"><?php esc_html_e( 'Change', 'fw' ); ?></th>
 				<th class="num"><?php esc_html_e( 'Unique', 'fw' ); ?></th>
 				<th class="num"><?php esc_html_e( 'Avg time', 'fw' ); ?></th>
 				<th class="num" title="<?php esc_attr_e( 'Share of page views that scrolled at least half-way down', 'fw' ); ?>"><?php esc_html_e( 'Read half', 'fw' ); ?></th>
@@ -484,10 +551,16 @@ class FW_VI_Admin_Page {
 						<a href="<?php echo esc_url( FW_VI_Reports::url( $r->path ) ); ?>" target="_blank" rel="noopener"><code><?php echo esc_html( $r->path ); ?></code></a>
 					</td>
 					<td class="num"><?php echo esc_html( number_format_i18n( $r->views ) ); ?></td>
+					<td class="num"><?php echo isset( $r->prev ) ? wp_kses_post( FW_VI_Reports::change( $r->views, $r->prev ) ) : ''; ?></td>
 					<td class="num"><?php echo esc_html( number_format_i18n( $r->uniques ) ); ?></td>
 					<td class="num"><?php echo esc_html( self::duration( $r->engaged ) ); ?></td>
 					<td class="num"><?php echo null === $r->half ? '—' : esc_html( $r->half . '%' ); ?></td>
-					<td class="num"><a class="button button-small" href="<?php echo esc_url( self::url( 'heatmaps', array( 'path' => $r->path ) ) ); ?>"><?php esc_html_e( 'Heatmap', 'fw' ); ?></a></td>
+					<td class="num">
+						<a class="button button-small" href="<?php echo esc_url( self::url( 'heatmaps', array( 'path' => $r->path ) ) ); ?>"><?php esc_html_e( 'Heatmap', 'fw' ); ?></a>
+						<?php if ( ! empty( $recs[ $r->path ] ) ) : ?>
+							<a class="button button-small" title="<?php esc_attr_e( 'Recordings of this page', 'fw' ); ?>" href="<?php echo esc_url( self::url( 'recordings', array( 'rec_path' => $r->path ) ) ); ?>"><span class="dashicons dashicons-video-alt3" style="font-size:16px;width:16px;height:16px;vertical-align:-4px"></span> <?php echo (int) $recs[ $r->path ]; ?></a>
+						<?php endif; ?>
+					</td>
 				</tr>
 			<?php endforeach; ?>
 			</tbody>
@@ -505,7 +578,7 @@ class FW_VI_Admin_Page {
 
 		$path = '/' . ltrim( $path, '/' );
 		?>
-		<?php $mode = isset( $_GET['mode'] ) && in_array( $_GET['mode'], array( 'clicks', 'scroll', 'attention', 'elements', 'frustration' ), true ) ? sanitize_key( $_GET['mode'] ) : 'clicks'; // phpcs:ignore WordPress.Security ?>
+		<?php $mode = isset( $_GET['mode'] ) && in_array( $_GET['mode'], array( 'clicks', 'scroll', 'attention', 'elements', 'frustration', 'moves' ), true ) ? sanitize_key( $_GET['mode'] ) : 'clicks'; // phpcs:ignore WordPress.Security ?>
 		<div class="fw-vi-hm" data-src="<?php echo esc_url( FW_VI_Heatmaps::view_url( $path, true ) ); ?>" data-mode="<?php echo esc_attr( $mode ); ?>">
 			<form class="fw-vi-hm__bar" method="get" action="<?php echo esc_url( admin_url( 'admin.php' ) ); ?>">
 				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
@@ -529,6 +602,9 @@ class FW_VI_Admin_Page {
 					<button type="button" data-value="attention"><?php esc_html_e( 'Attention', 'fw' ); ?></button>
 					<button type="button" data-value="elements"><?php esc_html_e( 'Elements', 'fw' ); ?></button>
 					<button type="button" data-value="frustration"><?php esc_html_e( 'Frustration', 'fw' ); ?></button>
+					<?php if ( FW_VI_Settings::get()['track_moves'] ) : ?>
+						<button type="button" data-value="moves"><?php esc_html_e( 'Movement', 'fw' ); ?></button>
+					<?php endif; ?>
 				</span>
 
 				<span class="fw-vi-seg" data-name="device" role="group" aria-label="<?php esc_attr_e( 'Device', 'fw' ); ?>">
@@ -536,6 +612,14 @@ class FW_VI_Admin_Page {
 					<button type="button" data-value="t"><span class="dashicons dashicons-tablet"></span> <?php esc_html_e( 'Tablet', 'fw' ); ?></button>
 					<button type="button" data-value="m"><span class="dashicons dashicons-smartphone"></span> <?php esc_html_e( 'Mobile', 'fw' ); ?></button>
 				</span>
+
+				<label><span class="screen-reader-text"><?php esc_html_e( 'Visits from', 'fw' ); ?></span>
+					<select data-name="ch" title="<?php esc_attr_e( 'Only visits from this channel (counted from Visitor Insights 1.0.6 on)', 'fw' ); ?>">
+						<?php foreach ( FW_VI_Heatmaps::channel_choices() as $k => $label ) : ?>
+							<option value="<?php echo esc_attr( $k ); ?>"><?php echo esc_html( $label ); ?></option>
+						<?php endforeach; ?>
+					</select>
+				</label>
 
 				<label><span class="screen-reader-text"><?php esc_html_e( 'Period', 'fw' ); ?></span>
 					<select data-name="days">
@@ -546,6 +630,11 @@ class FW_VI_Admin_Page {
 				</label>
 
 				<a class="button" href="<?php echo esc_url( FW_VI_Heatmaps::view_url( $path, false ) ); ?>" target="_blank" rel="noopener"><?php esc_html_e( 'Open full size', 'fw' ); ?></a>
+				<button type="button" class="button" data-export><span class="dashicons dashicons-format-image" style="vertical-align:-4px"></span> <?php esc_html_e( 'Download image', 'fw' ); ?></button>
+				<?php $recs = FW_VI_Recordings::count_for( $path ); ?>
+				<?php if ( $recs ) : ?>
+					<a class="button" href="<?php echo esc_url( self::url( 'recordings', array( 'rec_path' => $path ) ) ); ?>"><span class="dashicons dashicons-video-alt3" style="vertical-align:-4px"></span> <?php echo esc_html( sprintf( _n( '%s recording of this page', '%s recordings of this page', $recs, 'fw' ), number_format_i18n( $recs ) ) ); ?></a>
+				<?php endif; ?>
 			</form>
 
 			<p class="fw-vi-hm__info" aria-live="polite"></p>
@@ -586,6 +675,11 @@ class FW_VI_Admin_Page {
 				<li><?php echo $consent
 					? '<span class="dashicons dashicons-yes-alt"></span> ' . esc_html__( 'A consent plugin using the WordPress Consent API is active. Tracking waits for "anonymous statistics" consent.', 'fw' )
 					: '<span class="dashicons dashicons-info"></span> ' . esc_html__( 'No consent plugin using the WordPress Consent API is active. The Consent setting below decides.', 'fw' ); ?></li>
+				<?php if ( FW_VI_Settings::get()['recording'] ) : ?>
+					<li><?php echo ( 'api' === FW_VI_Settings::get()['rec_consent'] && ! $consent )
+						? '<span class="dashicons dashicons-warning" style="color:#d63638"></span> ' . esc_html__( 'Session recording is on but waits for a consent plugin that supports the WordPress Consent API, and none is active — so nothing is being recorded.', 'fw' )
+						: '<span class="dashicons dashicons-video-alt3"></span> ' . esc_html__( 'Session recording is on: visits are recorded only after the visitor consents. Let visitors delete their own recording with [visitor_insights_recording].', 'fw' ); ?></li>
+				<?php endif; ?>
 				<li><span class="dashicons dashicons-shield"></span> <?php echo wp_kses( __( 'Let visitors opt out with the <code>[visitor_insights_optout]</code> shortcode, e.g. on your privacy policy page.', 'fw' ), array( 'code' => array() ) ); ?></li>
 			</ul>
 			<form method="post" action="<?php echo esc_url( self::url( 'settings' ) ); ?>">
@@ -593,6 +687,19 @@ class FW_VI_Admin_Page {
 				<input type="hidden" name="fw_vi_action" value="retest" />
 				<button type="submit" class="button button-small"><?php esc_html_e( 'Check the collector again', 'fw' ); ?></button>
 			</form>
+			<form method="post" action="<?php echo esc_url( self::url( 'settings' ) ); ?>" style="margin-top:8px">
+				<?php wp_nonce_field( self::NONCE ); ?>
+				<input type="hidden" name="fw_vi_action" value="digest_test" />
+				<button type="submit" class="button button-small"><?php esc_html_e( 'Send me a test of the weekly email', 'fw' ); ?></button>
+			</form>
+			<form method="post" action="<?php echo esc_url( self::url( 'settings' ) ); ?>" style="margin-top:8px">
+				<?php wp_nonce_field( self::NONCE ); ?>
+				<input type="hidden" name="fw_vi_action" value="alerts_check" />
+				<button type="submit" class="button button-small"><?php esc_html_e( 'Check yesterday for alerts now', 'fw' ); ?></button>
+			</form>
+			<?php if ( function_exists( 'fw_ai_register_ability' ) ) : ?>
+				<p class="description" style="margin-top:12px"><?php esc_html_e( 'The AI Assistant can read these reports: ask it, for example, "Which section of the home page loses mobile visitors?" or "Why is nobody clicking the pricing button?"', 'fw' ); ?></p>
+			<?php endif; ?>
 		</div>
 
 		<form method="post" action="<?php echo esc_url( self::url( 'settings' ) ); ?>">
@@ -632,7 +739,7 @@ class FW_VI_Admin_Page {
 	 *
 	 * @param array $series [ {date, views, uniques} ]
 	 */
-	private static function chart( array $series ) {
+	private static function chart( array $series, array $notes = array() ) {
 		$n     = count( $series );
 		$max   = max( 1, max( wp_list_pluck( $series, 'views' ) ) );
 		$scale = self::nice( $max );
@@ -669,6 +776,16 @@ class FW_VI_Admin_Page {
 				</g>
 				<?php if ( 0 === $i % $every ) : ?>
 					<text class="fw-vi-chart__axis" x="<?php echo esc_attr( $pl + $slot * $i + $slot / 2 ); ?>" y="<?php echo (int) ( $h + 17 ); ?>" text-anchor="middle"><?php echo esc_html( date_i18n( 'M j', $ts ) ); ?></text>
+				<?php endif; ?>
+			<?php endforeach; ?>
+			<?php foreach ( $series as $i => $d ) : ?>
+				<?php if ( ! empty( $notes[ $d['date'] ] ) ) : ?>
+					<?php $nx = $pl + $slot * $i + $slot / 2; ?>
+					<g class="fw-vi-chart__note">
+						<title><?php echo esc_html( date_i18n( get_option( 'date_format' ), strtotime( $d['date'] . ' 12:00:00' ) ) . ': ' . implode( ' · ', $notes[ $d['date'] ] ) ); ?></title>
+						<line x1="<?php echo esc_attr( $nx ); ?>" x2="<?php echo esc_attr( $nx ); ?>" y1="6" y2="<?php echo (int) $h; ?>" />
+						<circle cx="<?php echo esc_attr( $nx ); ?>" cy="6" r="5" />
+					</g>
 				<?php endif; ?>
 			<?php endforeach; ?>
 		</svg>

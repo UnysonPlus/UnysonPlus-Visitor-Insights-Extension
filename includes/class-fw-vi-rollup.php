@@ -106,12 +106,16 @@ class FW_VI_Rollup {
 			'clicks' => array(), 'scroll' => array(), 'sections' => array(), 'live' => array(),
 			'goals' => array(), 'friction' => array(), 'errors' => array(), 'errmsg' => array(),
 			'notfound' => array(), 'vitals' => array(),
+			'forms' => array(), 'labels' => array(), 'fields' => array(), 'fpos' => array(), 'search' => array(), 'moves' => array(), 'chd' => array(), 'hmch' => array(),
 		);
 		$seen  = array(); // page|day|vid → counted (a view over the daily cap is ignored whole)
 		$lines = 0;
 		$known = FW_VI_Goals::known_keys();
 		$pgoal = FW_VI_Goals::page_goals();
 		$vidvh = array(); // view id → visitor hash, from this run's page views
+		$vidch = array(); // view id → channel
+		$hq    = array(); // heatmap signals to repeat per channel: [vid, page, day, dev, kind, item, a, b, n]
+		$chq   = array(); // channel credits waiting for a view id seen in an earlier run: [vid, page, day, column]
 		$tps   = array(); // funnel touchpoints: [ts, vh|null, vid, kind p|g, value, day]
 
 		while ( false !== ( $raw = fgets( $fh ) ) ) {
@@ -137,6 +141,8 @@ class FW_VI_Rollup {
 						}
 					} elseif ( 'n' === $e[0] ) {
 						self::add( $agg['notfound'], array( $day, (string) $path, (string) $e[1] ), array( 1 ) );
+					} elseif ( 'q' === $e[0] && '' !== (string) $e[1] ) {
+						self::add( $agg['search'], array( $day, (string) $e[1] ), array( 1, 0 === (int) $e[2] ? 1 : 0 ) );
 					}
 				}
 				continue;
@@ -179,6 +185,12 @@ class FW_VI_Rollup {
 					$dims += array( 'ref' => $pv[0] ?? '', 'us' => $pv[1] ?? '', 'um' => $pv[2] ?? '', 'uc' => $pv[3] ?? '' );
 				}
 
+				$dims['ch']    = FW_VI_Channels::classify( $pv[0] ?? '', $pv[1] ?? '', $pv[2] ?? '' );
+				$vidch[ $vid ] = $dims['ch'];
+				self::add( $agg['chd'], array( $page, $day, $dims['ch'] ), array( 1, 0, 0, 0 ) );
+				$hq[] = array( $vid, $page, $day, $dev, 'v', '', 0, 0, 1 );
+				self::add( $agg['chd'], array( 0, $day, $dims['ch'] ), array( 1, 0, 0, 0 ) );
+
 				foreach ( $dims as $dim => $val ) {
 					if ( '' !== (string) $val ) {
 						self::add( $agg['sources'], array( $page, $day, $dim, mb_substr( (string) $val, 0, 150 ) ), array( 1 ) );
@@ -188,7 +200,7 @@ class FW_VI_Rollup {
 				continue; // the rest of a view that was over the cap
 			}
 
-			$agg['live'][ $vid ] = array( $page, $dev, (int) $ts, $vidvh[ $vid ] ?? '' );
+			$agg['live'][ $vid ] = array( $page, $dev, (int) $ts, $vidvh[ $vid ] ?? '', $vidch[ $vid ] ?? '' );
 
 			foreach ( (array) $events as $e ) {
 				switch ( $e[0] ) {
@@ -198,33 +210,68 @@ class FW_VI_Rollup {
 						} else {
 							self::add( $agg['clicks'], array( $page, $day, $dev, $e[2], $e[3] ), array( 1 ) );
 						}
+						$hq[] = array( $vid, $page, $day, $dev, '' !== $e[1] ? 'e' : 'c', $e[1], $e[2], $e[3], 1 );
 						break;
 					case 's':
 						self::add( $agg['scroll'], array( $page, $day, $dev, $e[1] ), array( 1 ) );
+						$hq[] = array( $vid, $page, $day, $dev, 's', '', (int) $e[1], 0, 1 );
+						if ( 50 === (int) $e[1] ) {
+							$chq[] = array( $vid, $page, $day, 2, 1 );
+						}
 						break;
 					case 'r':
 						self::add( $agg['sections'], array( $page, $day, $dev, $e[1] ), array( 1, 0 ) );
+						$hq[] = array( $vid, $page, $day, $dev, 'r', $e[1], 0, 0, 1 );
 						break;
 					case 'a':
 						self::add( $agg['sections'], array( $page, $day, $dev, $e[1] ), array( 0, $e[2] ) );
+						$hq[] = array( $vid, $page, $day, $dev, 't', $e[1], 0, 0, (int) $e[2] );
 						break;
 					case 't':
 						self::add( $agg['views'], array( $page, $day, $dev ), array( 0, 0, $e[1] ) );
 						self::add( $agg['views'], array( 0, $day, $dev ), array( 0, 0, $e[1] ) );
+						$chq[] = array( $vid, $page, $day, 1, (int) $e[1] );
 						break;
 					case 'g':
 						if ( isset( $known[ $e[1] ] ) ) {
 							self::add( $agg['goals'], array( $page, $day, $dev, $e[1] ), array( 1, (int) $e[2] ) );
+							$chq[] = array( $vid, $page, $day, 3, 1 );
 							$tps[] = array( (int) $ts, $vidvh[ $vid ] ?? null, $vid, 'g', $e[1], $day );
 						}
 						break;
 					case 'f':
 						self::add( $agg['friction'], array( $page, $day, $dev, $e[2], $e[1] ), array( 1 ) );
+						$hq[] = array( $vid, $page, $day, $dev, 'f', $e[2], array( 'r' => 1, 'd' => 2, 'e' => 3 )[ $e[1] ], 0, 1 );
 						break;
 					case 'x':
 						$hash = substr( md5( $e[1] . '|' . $e[2] . '|' . $e[3] ), 0, 16 );
 						self::add( $agg['errors'], array( $page, $day, $hash ), array( 1 ) );
 						$agg['errmsg'][ $hash ] = array( $e[1], $e[2], (int) $e[3] );
+						break;
+					case 'fs':
+						self::add( $agg['forms'], array( $page, $day, $e[1] ), array( 1, 0, 0 ) );
+						if ( '' !== $e[2] ) {
+							$agg['labels'][ $page . "\x1f" . $day . "\x1f" . $e[1] ] = $e[2];
+						}
+						break;
+					case 'fc':
+						self::add( $agg['forms'], array( $page, $day, $e[1] ), array( 0, 1, 0 ) );
+						break;
+					case 'fa':
+						self::add( $agg['forms'], array( $page, $day, $e[1] ), array( 0, 0, 1 ) );
+						self::add( $agg['fields'], array( $page, $day, $e[1], $e[2] ), array( 0, 0, 1 ) );
+						break;
+					case 'ff':
+						self::add( $agg['fields'], array( $page, $day, $e[1], $e[2] ), array( 0, 1, 0 ) );
+						$fk                = implode( "", array( $page, $day, $e[1], $e[2] ) );
+						$agg['fpos'][ $fk ] = max( $agg['fpos'][ $fk ] ?? 0, (int) $e[3] );
+						break;
+					case 'm':
+						self::add( $agg['moves'], array( $page, $day, $dev, $e[1], $e[2], $e[3] ), array( (int) $e[4] ) );
+						$hq[] = array( $vid, $page, $day, $dev, 'm', $e[1], $e[2], $e[3], (int) $e[4] );
+						break;
+					case 'e':
+						$tps[] = array( (int) $ts, $vidvh[ $vid ] ?? null, $vid, 'e', $e[1] . '|' . $e[2], $day );
 						break;
 					case 'v':
 						self::add( $agg['vitals'], array( $page, $day, $dev, $e[1], FW_VI_Vitals::bucket( $e[1], (int) $e[2] ) ), array( 1 ) );
@@ -235,10 +282,13 @@ class FW_VI_Rollup {
 
 		fclose( $fh ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 
+		self::credit_channels( $agg, $chq, $vidch, $hq );
 		self::write( $agg );
 
 		if ( $tps ) {
-			FW_VI_Funnels::process( self::resolve_visitors( $tps ) );
+			$tps = self::resolve_visitors( $tps );
+			FW_VI_Funnels::process( $tps );
+			FW_VI_Experiments::process( $tps );
 		}
 
 		return $lines;
@@ -290,6 +340,10 @@ class FW_VI_Rollup {
 	 *
 	 * @return int
 	 */
+	public static function forget_pages() {
+		self::$pages = array();
+	}
+
 	public static function page_id( $post_id, $path ) {
 		global $wpdb;
 
@@ -354,6 +408,12 @@ class FW_VI_Rollup {
 		self::upsert( 'notfound', array( 'day' => '%s', 'path' => '%s', 'ref' => '%s' ), array( 'n' ), $agg['notfound'] );
 		self::upsert( 'vitals', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'metric' => '%s', 'bucket' => '%d' ), array( 'n' ), $agg['vitals'] );
 
+		self::upsert( 'search', array( 'day' => '%s', 'term' => '%s' ), array( 'n', 'zero' ), $agg['search'] );
+		self::upsert( 'hmch', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'ch' => '%s', 'kind' => '%s', 'item' => '%s', 'a' => '%d', 'b' => '%d' ), array( 'n' ), $agg['hmch'] );
+		self::upsert( 'chdaily', array( 'page_id' => '%d', 'day' => '%s', 'ch' => '%s' ), array( 'views', 'engaged_ms', 'half', 'goals' ), $agg['chd'] );
+		self::upsert( 'moves', array( 'page_id' => '%d', 'day' => '%s', 'device' => '%s', 'item' => '%s', 'a' => '%d', 'b' => '%d' ), array( 'n' ), $agg['moves'] );
+		self::write_forms( $agg );
+
 		if ( $agg['errmsg'] ) {
 			$mtable = FW_VI_Installer::table( 'errmsg' );
 			foreach ( array_chunk( $agg['errmsg'], self::CHUNK, true ) as $chunk ) {
@@ -370,9 +430,90 @@ class FW_VI_Rollup {
 			foreach ( array_chunk( $agg['live'], self::CHUNK, true ) as $chunk ) {
 				$rows = array();
 				foreach ( $chunk as $vid => $v ) {
-					$rows[] = $wpdb->prepare( '(%s,%d,%s,%d,%s)', $vid, $v[0], $v[1], $v[2], $v[3] );
+					$rows[] = $wpdb->prepare( '(%s,%d,%s,%d,%s,%s)', $vid, $v[0], $v[1], $v[2], $v[3], $v[4] );
 				}
-				$wpdb->query( "INSERT INTO {$ltable} (vid, page_id, device, seen, vh) VALUES " . implode( ',', $rows ) . " ON DUPLICATE KEY UPDATE seen = GREATEST(seen, VALUES(seen)), vh = IF(VALUES(vh) <> '', VALUES(vh), vh)" ); // phpcs:ignore WordPress.DB
+				$wpdb->query( "INSERT INTO {$ltable} (vid, page_id, device, seen, vh, ch) VALUES " . implode( ',', $rows ) . " ON DUPLICATE KEY UPDATE seen = GREATEST(seen, VALUES(seen)), vh = IF(VALUES(vh) <> '', VALUES(vh), vh), ch = IF(VALUES(ch) <> '', VALUES(ch), ch)" ); // phpcs:ignore WordPress.DB
+			}
+		}
+	}
+
+	/**
+	 * Credit engaged time, half-way scrolls and goals to the channel of the
+	 * page view they belong to. Views first seen in an earlier run are looked
+	 * up on their live row.
+	 *
+	 * @param array $agg
+	 * @param array $chq   [vid, page, day, column 1 engaged | 2 half | 3 goals, amount]
+	 * @param array $vidch
+	 */
+	private static function credit_channels( array &$agg, array $chq, array $vidch, array $hq = array() ) {
+		global $wpdb;
+
+		$missing = array();
+		foreach ( array_merge( $chq, $hq ) as $c ) {
+			if ( ! isset( $vidch[ $c[0] ] ) ) {
+				$missing[ $c[0] ] = true;
+			}
+		}
+
+		if ( $missing ) {
+			$in = implode( ',', array_map( function ( $v ) use ( $wpdb ) {
+				return $wpdb->prepare( '%s', $v );
+			}, array_keys( $missing ) ) );
+			foreach ( $wpdb->get_results( 'SELECT vid, ch FROM ' . FW_VI_Installer::table( 'live' ) . " WHERE vid IN ({$in}) AND ch <> ''" ) as $r ) { // phpcs:ignore WordPress.DB
+				$vidch[ $r->vid ] = $r->ch;
+			}
+		}
+
+		foreach ( $chq as $c ) {
+			if ( ! isset( $vidch[ $c[0] ] ) ) {
+				continue;
+			}
+			$vals          = array( 0, 0, 0, 0 );
+			$vals[ $c[3] ] = $c[4];
+			self::add( $agg['chd'], array( $c[1], $c[2], $vidch[ $c[0] ] ), $vals );
+			self::add( $agg['chd'], array( 0, $c[2], $vidch[ $c[0] ] ), $vals );
+		}
+
+		foreach ( $hq as $h ) {
+			if ( isset( $vidch[ $h[0] ] ) ) {
+				self::add( $agg['hmch'], array( $h[1], $h[2], $h[3], $vidch[ $h[0] ], $h[4], $h[5], $h[6], $h[7] ), array( $h[8] ) );
+			}
+		}
+	}
+
+	/**
+	 * Forms keep a label (last one wins) and fields a position (the largest
+	 * seen), so they are written here rather than by the summing upsert.
+	 *
+	 * @param array $agg
+	 */
+	private static function write_forms( array $agg ) {
+		global $wpdb;
+
+		if ( $agg['forms'] ) {
+			$t = FW_VI_Installer::table( 'forms' );
+			foreach ( array_chunk( $agg['forms'], self::CHUNK, true ) as $chunk ) {
+				$rows = array();
+				foreach ( $chunk as $k => $entry ) {
+					list( $page, $day, $form ) = $entry[0];
+					$rows[] = $wpdb->prepare( '(%d,%s,%s,%s,%d,%d,%d)', $page, $day, $form, $agg['labels'][ $k ] ?? '', $entry[1][0], $entry[1][1], $entry[1][2] );
+				}
+				$wpdb->query( "INSERT INTO {$t} (page_id, day, form, label, starts, submits, abandons) VALUES " . implode( ',', $rows )
+					. " ON DUPLICATE KEY UPDATE label = IF(VALUES(label) <> '', VALUES(label), label), starts = starts + VALUES(starts), submits = submits + VALUES(submits), abandons = abandons + VALUES(abandons)" ); // phpcs:ignore WordPress.DB
+			}
+		}
+
+		if ( $agg['fields'] ) {
+			$t = FW_VI_Installer::table( 'fields' );
+			foreach ( array_chunk( $agg['fields'], self::CHUNK, true ) as $chunk ) {
+				$rows = array();
+				foreach ( $chunk as $k => $entry ) {
+					list( $page, $day, $form, $field ) = $entry[0];
+					$rows[] = $wpdb->prepare( '(%d,%s,%s,%s,%d,%d,%d)', $page, $day, $form, $field, $agg['fpos'][ $k ] ?? 0, $entry[1][1], $entry[1][2] );
+				}
+				$wpdb->query( "INSERT INTO {$t} (page_id, day, form, field, pos, touched, lastn) VALUES " . implode( ',', $rows )
+					. ' ON DUPLICATE KEY UPDATE pos = GREATEST(pos, VALUES(pos)), touched = touched + VALUES(touched), lastn = lastn + VALUES(lastn)' ); // phpcs:ignore WordPress.DB
 			}
 		}
 	}

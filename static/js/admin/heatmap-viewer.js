@@ -21,7 +21,11 @@
 	}
 
 	var L = V.l10n || {};
-	var st = { mode: 'clicks', device: deviceOf(w.innerWidth), days: 30 };
+	var st = { mode: 'clicks', device: deviceOf(w.innerWidth), days: 30, ch: '' };
+	// Offset from viewport to target-canvas coordinates: 0 on screen, the scroll
+	// position while drawing the whole page for an image export.
+	var OX = 0;
+	var OY = 0;
 	var data = null;
 	var base, heatCanvas, heat, bctx, raf = 0, req = 0, cache = {}, missing = 0;
 	var dpr = Math.max(1, Math.min(2, w.devicePixelRatio || 1));
@@ -59,6 +63,12 @@
 		return cache[item];
 	}
 
+	/** An element's box in target-canvas coordinates. */
+	function box(node) {
+		var r = node.getBoundingClientRect();
+		return { left: r.left + OX, top: r.top + OY, right: r.right + OX, bottom: r.bottom + OY, width: r.width, height: r.height };
+	}
+
 	function shown(node) {
 		if (!node) {
 			return false;
@@ -79,7 +89,7 @@
 
 	function load() {
 		var id = ++req;
-		var url = V.rest + (V.rest.indexOf('?') < 0 ? '?' : '&') + 'path=' + encodeURIComponent(V.path) + '&device=' + st.device + '&days=' + st.days;
+		var url = V.rest + (V.rest.indexOf('?') < 0 ? '?' : '&') + 'path=' + encodeURIComponent(V.path) + '&device=' + st.device + '&days=' + st.days + '&ch=' + encodeURIComponent(st.ch || '');
 
 		w.fetch(url, { credentials: 'same-origin', headers: { 'X-WP-Nonce': V.nonce } })
 			.then(function (r) {
@@ -162,9 +172,10 @@
 	}
 
 	function render() {
-		var W = w.innerWidth;
-		var H = w.innerHeight;
+		renderInto(w.innerWidth, w.innerHeight);
+	}
 
+	function renderInto(W, H) {
 		bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		bctx.clearRect(0, 0, W, H);
 		heat.clear();
@@ -180,25 +191,43 @@
 			return;
 		}
 
-		({ clicks: drawClicks, scroll: drawScroll, attention: drawAttention, elements: drawElements, frustration: drawFrustration }[st.mode] || drawClicks)(W, H);
+		({ clicks: drawClicks, scroll: drawScroll, attention: drawAttention, elements: drawElements, frustration: drawFrustration, moves: drawMoves }[st.mode] || drawClicks)(W, H);
 	}
 
 	function drawClicks(W, H) {
+		drawHeat(W, H, data.elem || [], data.grid || []);
+	}
+
+	/** Pointer movement: the same drawing as clicks, from the movement bins. */
+	function drawMoves(W, H) {
+		var elem = [];
+		var grid = [];
+		(data.moves || []).forEach(function (m) {
+			if (m[0]) {
+				elem.push(m);
+			} else {
+				grid.push([m[1], m[2], m[3]]);
+			}
+		});
+		drawHeat(W, H, elem, grid);
+	}
+
+	function drawHeat(W, H, elemList, gridList) {
 		bctx.fillStyle = 'rgba(15,23,42,.45)';
 		bctx.fillRect(0, 0, W, H);
 
 		var pts = [];
 		var max = 1;
-		var sx = w.pageXOffset;
-		var sy = w.pageYOffset;
+		var sx = w.pageXOffset - OX;
+		var sy = w.pageYOffset - OY;
 
-		(data.elem || []).forEach(function (e) {
+		elemList.forEach(function (e) {
 			max = Math.max(max, e[3]);
 			var node = el(e[0]);
 			if (!shown(node)) {
 				return;
 			}
-			var r = node.getBoundingClientRect();
+			var r = box(node);
 			var x = r.left + (e[1] + 0.5) / 10 * r.width;
 			var y = r.top + (e[2] + 0.5) / 10 * r.height;
 			if (x > -40 && x < W + 40 && y > -40 && y < H + 40) {
@@ -207,7 +236,7 @@
 		});
 
 		var dw = docW();
-		(data.grid || []).forEach(function (g) {
+		gridList.forEach(function (g) {
 			max = Math.max(max, g[2]);
 			var x = g[0] / 100 * dw - sx;
 			var y = g[1] * 20 + 10 - sy;
@@ -250,7 +279,7 @@
 
 		var views = Math.max(1, data.views);
 		var dh = docH();
-		var sy = w.pageYOffset;
+		var sy = w.pageYOffset - OY;
 		var marks = { 75: false, 50: false, 25: false };
 
 		for (var b = 0; b < 100; b += 5) {
@@ -313,7 +342,7 @@
 			if (node.parentElement && node.parentElement.closest('section[data-fw-item-id]')) {
 				return;
 			}
-			var r = node.getBoundingClientRect();
+			var r = box(node);
 			if (r.bottom < 0 || r.top > H || !r.height) {
 				return;
 			}
@@ -351,7 +380,7 @@
 			if (!shown(node)) {
 				return;
 			}
-			var r = node.getBoundingClientRect();
+			var r = box(node);
 			if (r.bottom < 0 || r.top > H) {
 				return;
 			}
@@ -385,7 +414,7 @@
 			if (!shown(node)) {
 				return;
 			}
-			var r = node.getBoundingClientRect();
+			var r = box(node);
 			if (r.bottom < 0 || r.top > H) {
 				return;
 			}
@@ -411,6 +440,153 @@
 		if (page) {
 			label(fmt(L.pageLevel, page), 12, 12, { bg: 'rgba(185,28,28,.95)' });
 		}
+	}
+
+	/* ------------------------------------------------------------------ export */
+
+	function script(src) {
+		return new Promise(function (resolve, reject) {
+			var sc = d.createElement('script');
+			sc.src = src;
+			sc.onload = resolve;
+			sc.onerror = reject;
+			d.head.appendChild(sc);
+		});
+	}
+
+	/**
+	 * The whole page with the current map on top, as a PNG download. The page is
+	 * rendered by html2canvas (loaded on first use), then the map is drawn again
+	 * at page scale on its own layers, and a caption strip says what it shows.
+	 */
+	function exportImage() {
+		if (!data) {
+			return;
+		}
+
+		var ready = w.html2canvas ? Promise.resolve() : script(V.h2c);
+		// The library exposes a function, or an object holding it (UMD build).
+		var h2c = function () {
+			var lib = w.html2canvas;
+			return typeof lib === 'function' ? lib : (lib && (lib['default'] || lib.html2canvas));
+		};
+
+		ready.then(function () {
+			var dw = docW();
+			var dh = Math.min(docH(), 12000);
+			var hidden = [base, heatCanvas, toolbar].filter(Boolean);
+
+			hidden.forEach(function (n) {
+				n.style.visibility = 'hidden';
+			});
+
+			return h2c()(d.body, {
+				x: 0,
+				y: 0,
+				width: dw,
+				height: dh,
+				windowWidth: dw,
+				windowHeight: dh,
+				scrollX: -w.pageXOffset,
+				scrollY: -w.pageYOffset,
+				scale: 1,
+				useCORS: true,
+				logging: false,
+				backgroundColor: '#ffffff',
+				ignoreElements: function (n) {
+					return n === base || n === heatCanvas || n === toolbar || n.id === 'wpadminbar';
+				}
+			}).then(function (pageCanvas) {
+				hidden.forEach(function (n) {
+					n.style.visibility = '';
+				});
+
+				var head = 44;
+				var out = d.createElement('canvas');
+				out.width = pageCanvas.width;
+				out.height = pageCanvas.height + head;
+				var o = out.getContext('2d');
+
+				o.fillStyle = '#0f172a';
+				o.fillRect(0, 0, out.width, head);
+				o.fillStyle = '#fff';
+				o.font = '600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+				var dev = { d: L.desktop, t: L.tablet, m: L.mobile }[st.device] || '';
+				var chn = st.ch && V.channels ? ' · ' + (V.channels[st.ch] || st.ch) : '';
+				o.fillText([L[st.mode] || st.mode, V.path, dev, fmt(L.days, st.days) + chn, fmt(L.views, (data.views || 0).toLocaleString())].join('  ·  '), 16, 28);
+				o.drawImage(pageCanvas, 0, head);
+
+				// Draw the map again at page scale, on layers of its own.
+				var lb = d.createElement('canvas');
+				var lh = d.createElement('canvas');
+				lb.width = lh.width = pageCanvas.width;
+				lb.height = lh.height = pageCanvas.height;
+
+				var saved = { bctx: bctx, heat: heat, dpr: dpr, OX: OX, OY: OY };
+				bctx = lb.getContext('2d');
+				heat = w.simpleheat(lh);
+				dpr = pageCanvas.width / dw;
+				OX = w.pageXOffset;
+				OY = w.pageYOffset;
+
+				try {
+					renderInto(dw, dh);
+				} finally {
+					bctx = saved.bctx;
+					heat = saved.heat;
+					dpr = saved.dpr;
+					OX = saved.OX;
+					OY = saved.OY;
+				}
+
+				o.drawImage(lb, 0, head);
+				o.drawImage(lh, 0, head);
+
+				out.toBlob(function (blob) {
+					var slug = (V.path || '/').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home';
+					var name = 'heatmap-' + slug + '-' + st.mode + '-' + st.device + (st.ch ? '-' + st.ch : '') + '.png';
+
+					// Browsers may refuse a download started from a frame after an
+					// asynchronous render, so a framed viewer hands the image to the
+					// admin screen, which offers it; on its own, the toolbar does.
+					if (V.framed && w.parent !== w) {
+						w.parent.postMessage({ type: 'upvi:image', blob: blob, name: name }, w.location.origin);
+						return;
+					}
+
+					offer(blob, name);
+				}, 'image/png');
+
+				draw();
+			});
+		}).catch(function (err) {
+			[base, heatCanvas, toolbar].filter(Boolean).forEach(function (n) {
+				n.style.visibility = '';
+			});
+			if (w.console) {
+				w.console.error('Visitor Insights: heatmap image export failed', err);
+			}
+		});
+	}
+
+	/** Start the download, and leave a "Save image" link in the toolbar for browsers that held it back. */
+	function offer(blob, name) {
+		var a = d.createElement('a');
+		a.href = w.URL.createObjectURL(blob);
+		a.download = name;
+		a.textContent = L.save || 'Save image';
+		a.style.cssText = 'color:#93c5fd;font-weight:600;text-decoration:underline';
+		if (toolbar) {
+			var old = toolbar.querySelector('.upvi-tb__save');
+			if (old) {
+				old.remove();
+			}
+			a.className = 'upvi-tb__save';
+			toolbar.insertBefore(a, toolbar.lastChild);
+		} else {
+			d.body.appendChild(a);
+		}
+		a.click();
 	}
 
 	/* ------------------------------------------------------------------ chrome */
@@ -443,9 +619,24 @@
 		toolbar.className = 'upvi-tb';
 		toolbar.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:2147483647;display:flex;gap:8px;align-items:center;padding:8px 10px;background:#0f172a;color:#fff;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.35);font:13px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
 
-		toolbar.appendChild(select('mode', [['clicks', L.clicks], ['scroll', L.scroll], ['attention', L.attention], ['elements', L.elements], ['frustration', L.frustration]], st.mode));
+		toolbar.appendChild(select('mode', [['clicks', L.clicks], ['scroll', L.scroll], ['attention', L.attention], ['elements', L.elements], ['frustration', L.frustration], ['moves', L.moves]], st.mode));
 		toolbar.appendChild(select('device', [['d', L.desktop], ['t', L.tablet], ['m', L.mobile]], st.device));
 		toolbar.appendChild(select('days', [[7, fmt(L.days, 7)], [30, fmt(L.days, 30)], [90, fmt(L.days, 90)], [365, fmt(L.days, 365)]], st.days));
+
+		if (V.channels) {
+			toolbar.appendChild(select('ch', Object.keys(V.channels).map(function (k) {
+				return [k, V.channels[k]];
+			}), st.ch));
+		}
+
+		var dl = d.createElement('button');
+		dl.type = 'button';
+		dl.textContent = '⤓';
+		dl.title = L.download || 'Download image';
+		dl.setAttribute('aria-label', dl.title);
+		dl.style.cssText = 'color:#fff;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:3px 8px;cursor:pointer;font:inherit';
+		dl.addEventListener('click', exportImage);
+		toolbar.appendChild(dl);
 
 		var info = d.createElement('span');
 		info.className = 'upvi-tb__info';
@@ -522,13 +713,21 @@
 			}, true);
 
 			w.addEventListener('message', function (e) {
-				if (e.origin !== w.location.origin || !e.data || e.data.type !== 'upvi:show') {
+				if (e.origin !== w.location.origin || !e.data) {
 					return;
 				}
-				var reload = e.data.device !== st.device || e.data.days !== st.days || !data;
+				if (e.data.type === 'upvi:export') {
+					exportImage();
+					return;
+				}
+				if (e.data.type !== 'upvi:show') {
+					return;
+				}
+				var reload = e.data.device !== st.device || e.data.days !== st.days || (e.data.ch || '') !== st.ch || !data;
 				st.mode = e.data.mode || st.mode;
 				st.device = e.data.device || st.device;
 				st.days = e.data.days || st.days;
+				st.ch = e.data.ch || '';
 				if (reload) {
 					load();
 				} else {

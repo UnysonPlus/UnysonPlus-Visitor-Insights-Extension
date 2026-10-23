@@ -16,7 +16,7 @@
  */
 class FW_VI_Installer {
 
-	const DB_VERSION        = '1.1.0';
+	const DB_VERSION        = '1.6.0';
 	const DB_VERSION_OPTION = 'fw_ext_visitor_insights_db_version';
 
 	const TABLES = array(
@@ -38,6 +38,20 @@ class FW_VI_Installer {
 		'errmsg'    => 'fw_vi_error_msgs',
 		'notfound'  => 'fw_vi_404',
 		'vitals'    => 'fw_vi_vitals',
+		// 1.2.0 — Phase 3
+		'forms'     => 'fw_vi_forms',
+		'fields'    => 'fw_vi_form_fields',
+		'search'    => 'fw_vi_search',
+		'xassign'   => 'fw_vi_exp_assign',
+		'xdaily'    => 'fw_vi_exp_daily',
+		// 1.3.0 — Phase 4
+		'recs'      => 'fw_vi_recordings',
+		// 1.4.0 — Phase 5
+		'moves'     => 'fw_vi_moves',
+		// 1.5.0 — Phase 6
+		'chdaily'   => 'fw_vi_chdaily',
+		// 1.6.0 — Phase 7
+		'hmch'      => 'fw_vi_hmch',
 	);
 
 	/**
@@ -167,6 +181,7 @@ class FW_VI_Installer {
 	page_id bigint(20) unsigned NOT NULL default 0,
 	device char(1) NOT NULL default 'd',
 	vh char(16) NOT NULL default '',
+	ch varchar(10) NOT NULL default '',
 	seen int(10) unsigned NOT NULL default 0,
 	PRIMARY KEY  (vid),
 	KEY seen (seen)
@@ -254,6 +269,137 @@ class FW_VI_Installer {
 	bucket smallint(5) unsigned NOT NULL default 0,
 	n int(10) unsigned NOT NULL default 0,
 	PRIMARY KEY  (page_id,day,device,metric,bucket)
+) {$c};" );
+
+		// --- 1.2.0: forms, search, experiments ----------------------------------
+
+		// One row per form per page and day. `form` is the builder item id of
+		// the form (or its id / name attribute); `label` is the nearest heading.
+		dbDelta( "CREATE TABLE {$t['forms']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	form varchar(40) NOT NULL default '',
+	label varchar(100) NOT NULL default '',
+	starts int(10) unsigned NOT NULL default 0,
+	submits int(10) unsigned NOT NULL default 0,
+	abandons int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,form)
+) {$c};" );
+
+		// touched = page views that focused the field; lastn = abandoned forms
+		// whose last focused field was this one. pos = the field's order.
+		dbDelta( "CREATE TABLE {$t['fields']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	form varchar(40) NOT NULL default '',
+	field varchar(40) NOT NULL default '',
+	pos smallint(5) unsigned NOT NULL default 0,
+	touched int(10) unsigned NOT NULL default 0,
+	lastn int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,form,field)
+) {$c};" );
+
+		dbDelta( "CREATE TABLE {$t['search']} (
+	day date NOT NULL default '1970-01-01',
+	term varchar(80) NOT NULL default '',
+	n int(10) unsigned NOT NULL default 0,
+	zero int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,term),
+	KEY day (day)
+) {$c};" );
+
+		// Which variant each of today's visitor hashes saw last ('a' / 'b'),
+		// which ones it saw at all, and whether it converted. Deleted with the
+		// salt, like funnel progress.
+		dbDelta( "CREATE TABLE {$t['xassign']} (
+	day date NOT NULL default '1970-01-01',
+	exp varchar(20) NOT NULL default '',
+	vh char(16) NOT NULL default '',
+	last char(1) NOT NULL default 'a',
+	seen varchar(2) NOT NULL default '',
+	converted tinyint(1) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,exp,vh)
+) {$c};" );
+
+		dbDelta( "CREATE TABLE {$t['xdaily']} (
+	day date NOT NULL default '1970-01-01',
+	exp varchar(20) NOT NULL default '',
+	variant char(1) NOT NULL default 'a',
+	visitors int(10) unsigned NOT NULL default 0,
+	conversions int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (day,exp,variant)
+) {$c};" );
+
+		// --- 1.3.0: session recordings (metadata; the events are files) -------
+
+		// One row per recorded session (a browser tab, ends after 30 idle
+		// minutes). flags: r rage, d dead, e error click, x script error, g goal.
+		dbDelta( "CREATE TABLE {$t['recs']} (
+	sid char(24) NOT NULL default '',
+	started int(10) unsigned NOT NULL default 0,
+	last_seen int(10) unsigned NOT NULL default 0,
+	device char(1) NOT NULL default 'd',
+	country char(2) NOT NULL default '',
+	first_path varchar(191) NOT NULL default '',
+	paths text NULL,
+	pages smallint(5) unsigned NOT NULL default 0,
+	chunks smallint(5) unsigned NOT NULL default 0,
+	bytes int(10) unsigned NOT NULL default 0,
+	flags varchar(10) NOT NULL default '',
+	ev_first bigint(20) unsigned NOT NULL default 0,
+	ev_last bigint(20) unsigned NOT NULL default 0,
+	PRIMARY KEY  (sid),
+	KEY last_seen (last_seen)
+) {$c};" );
+
+		// --- 1.4.0: pointer movement --------------------------------------------
+
+		// item = builder item (a, b = its 10% cell) or '' (a = % of page width,
+		// b = 20px row). n = sampled positions.
+		dbDelta( "CREATE TABLE {$t['moves']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	device char(1) NOT NULL default 'd',
+	item varchar(32) NOT NULL default '',
+	a smallint(5) unsigned NOT NULL default 0,
+	b smallint(5) unsigned NOT NULL default 0,
+	n int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,device,item,a,b)
+) {$c};" );
+
+		// --- 1.5.0: channel performance ------------------------------------------
+
+		// half = page views that scrolled at least half-way; goals = goal
+		// completions credited to the channel of the view they happened in.
+		dbDelta( "CREATE TABLE {$t['chdaily']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	ch varchar(10) NOT NULL default '',
+	views int(10) unsigned NOT NULL default 0,
+	engaged_ms bigint(20) unsigned NOT NULL default 0,
+	half int(10) unsigned NOT NULL default 0,
+	goals int(10) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,ch)
+) {$c};" );
+
+		// --- 1.6.0: heatmaps by channel --------------------------------------------
+
+		// Every heatmap signal again, keyed by the visit's channel, so a map can
+		// be drawn for one channel. kind: v view · e click in item (a, b = cell)
+		// · c click on page grid (a = %, b = row) · s scroll band (a) · r section
+		// reached · t section in view (n = ms) · m movement · f frustration
+		// (a = 1 rage, 2 dead, 3 error).
+		dbDelta( "CREATE TABLE {$t['hmch']} (
+	page_id bigint(20) unsigned NOT NULL default 0,
+	day date NOT NULL default '1970-01-01',
+	device char(1) NOT NULL default 'd',
+	ch varchar(10) NOT NULL default '',
+	kind char(1) NOT NULL default 'v',
+	item varchar(32) NOT NULL default '',
+	a smallint(5) unsigned NOT NULL default 0,
+	b smallint(5) unsigned NOT NULL default 0,
+	n bigint(20) unsigned NOT NULL default 0,
+	PRIMARY KEY  (page_id,day,device,ch,kind,item,a,b)
 ) {$c};" );
 
 		update_option( self::DB_VERSION_OPTION, self::DB_VERSION, true );

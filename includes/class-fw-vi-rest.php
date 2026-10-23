@@ -37,6 +37,7 @@ class FW_VI_REST {
 				'path'   => array( 'type' => 'string', 'required' => true ),
 				'device' => array( 'type' => 'string', 'enum' => array( 'd', 't', 'm' ), 'default' => 'd' ),
 				'days'   => array( 'type' => 'integer', 'minimum' => 1, 'maximum' => 730, 'default' => 30 ),
+				'ch'     => array( 'type' => 'string', 'default' => '' ),
 			),
 		) );
 
@@ -73,10 +74,13 @@ class FW_VI_REST {
 	public function heatmap( $request ) {
 		FW_VI_Rollup::run();
 
+		$ch = sanitize_key( (string) $request['ch'] );
+
 		return rest_ensure_response( FW_VI_Heatmaps::data(
 			(string) $request['path'],
 			(string) $request['device'],
-			(int) $request['days']
+			(int) $request['days'],
+			isset( FW_VI_Channels::labels()[ $ch ] ) ? $ch : ''
 		) );
 	}
 

@@ -27,7 +27,9 @@ class FW_VI_Element_IDs {
 	 * @return bool
 	 */
 	private function active() {
-		return '' !== FW_VI_Front::mode();
+		// A page with an A/B experiment needs the ids even for visitors who
+		// are not tracked: the CSS that shows one version hides by id.
+		return '' !== FW_VI_Front::mode() || (bool) FW_VI_Experiments::here();
 	}
 
 	/**

@@ -33,12 +33,13 @@ class FW_VI_Retention {
 		$days   = max( 30, (int) FW_VI_Settings::get()['retention_days'] );
 		$cutoff = wp_date( 'Y-m-d', time() - $days * DAY_IN_SECONDS );
 
-		foreach ( array( 'views', 'sources', 'elem', 'clicks', 'scroll', 'sections', 'goals', 'fdaily', 'friction', 'errors', 'notfound', 'vitals' ) as $which ) {
+		foreach ( array( 'views', 'sources', 'elem', 'clicks', 'scroll', 'sections', 'goals', 'fdaily', 'friction', 'errors', 'notfound', 'vitals', 'forms', 'fields', 'search', 'xdaily', 'moves', 'chdaily', 'hmch' ) as $which ) {
 			self::delete_where( FW_VI_Installer::table( $which ), 'day < %s', $cutoff );
 		}
 
 		self::delete_where( FW_VI_Installer::table( 'uniq' ), 'day < %s', wp_date( 'Y-m-d' ) );
 		self::delete_where( FW_VI_Installer::table( 'fprogress' ), 'day < %s', wp_date( 'Y-m-d' ) );
+		self::delete_where( FW_VI_Installer::table( 'xassign' ), 'day < %s', wp_date( 'Y-m-d' ) );
 
 		// Error messages no day refers to any more.
 		$wpdb->query( 'DELETE m FROM ' . FW_VI_Installer::table( 'errmsg' ) . ' m LEFT JOIN ' . FW_VI_Installer::table( 'errors' ) . ' e ON e.hash = m.hash WHERE e.hash IS NULL' ); // phpcs:ignore WordPress.DB

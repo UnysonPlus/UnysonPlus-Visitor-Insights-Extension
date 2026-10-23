@@ -36,6 +36,7 @@
 	var buf = [];
 	var mods = [];
 	var flushers = [];
+	var pushers = [];
 	var vid = rid();
 	var dev = device();
 	var timer = null;
@@ -43,6 +44,7 @@
 	var engagedTotal = 0;
 	var visSince = 0;
 	var firstPv = null;
+	var leaving = false;
 
 	function rid() {
 		var a = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -120,6 +122,12 @@
 		}
 	}
 
+	/** The page is really being left (not just a tab switch). */
+	function onPageHide() {
+		leaving = true;
+		flush();
+	}
+
 	function send(body) {
 		var ok = false;
 
@@ -187,7 +195,16 @@
 		push: function (ev) {
 			if (started) {
 				buf.push(ev);
+				for (var i = 0; i < pushers.length; i++) {
+					try {
+						pushers[i](ev);
+					} catch (e) {}
+				}
 			}
+		},
+		/** Watch every event modules push (the recorder flags visits with problems). */
+		onPush: function (fn) {
+			pushers.push(fn);
 		},
 		on: function () {
 			return started;
@@ -206,6 +223,10 @@
 			return Math.max(b ? b.scrollHeight : 0, e.scrollHeight, e.offsetHeight);
 		},
 		visible: isVisible,
+		/** True during the final batch, when the visitor is leaving the page. */
+		leaving: function () {
+			return leaving;
+		},
 		itemOk: function (id) {
 			return typeof id === 'string' && /^[A-Za-z0-9_-]{6,32}$/.test(id);
 		}
@@ -247,7 +268,7 @@
 		visSince = isVisible() ? now() : 0;
 
 		d.addEventListener('visibilitychange', onVisibility);
-		w.addEventListener('pagehide', flush);
+		w.addEventListener('pagehide', onPageHide);
 
 		var queued = mods;
 		mods = [];
@@ -272,7 +293,7 @@
 		buf = [];
 		w.clearInterval(timer);
 		d.removeEventListener('visibilitychange', onVisibility);
-		w.removeEventListener('pagehide', flush);
+		w.removeEventListener('pagehide', onPageHide);
 	}
 
 	function run(fn) {
@@ -306,7 +327,7 @@
 		/** Count a goal from the site's own script: UnysonPlusVI.goal( 'signup', 0 ). */
 		goal: function (key, value) {
 			if (started && typeof key === 'string' && /^[a-z0-9_-]{1,40}$/.test(key)) {
-				buf.push(['g', key, Math.max(0, Math.round(+value || 0))]);
+				api.push(['g', key, Math.max(0, Math.round(+value || 0))]);
 				flush();
 			}
 		},

@@ -97,6 +97,8 @@ class FW_VI_Heatmaps {
 			'path'   => FW_VI_Front::path(),
 			'framed' => self::framed(),
 			'admin'  => admin_url( 'admin.php?page=fw-visitor-insights&tab=heatmaps' ),
+			'channels' => self::channel_choices(),
+			'h2c'    => $this->ext->get_uri( '/static/js/vendor/html2canvas.min.js' ) . '?ver=2.4.5',
 			'l10n'   => self::l10n(),
 		) );
 	}
@@ -113,10 +115,13 @@ class FW_VI_Heatmaps {
 			'attention' => __( 'Attention', 'fw' ),
 			'elements'  => __( 'Elements', 'fw' ),
 			'frustration' => __( 'Frustration', 'fw' ),
+			'moves'     => __( 'Movement', 'fw' ),
 			'rage'      => __( '%s rage', 'fw' ),
 			'dead'      => __( '%s dead', 'fw' ),
 			'errorc'    => __( '%s error', 'fw' ),
 			'pageLevel' => __( 'Outside any element: %s', 'fw' ),
+			'download'  => __( 'Download image', 'fw' ),
+			'save'      => __( 'Save image', 'fw' ),
 			'desktop'   => __( 'Desktop data', 'fw' ),
 			'tablet'    => __( 'Tablet data', 'fw' ),
 			'mobile'    => __( 'Mobile data', 'fw' ),
@@ -129,6 +134,76 @@ class FW_VI_Heatmaps {
 			'close'     => __( 'Close heatmap', 'fw' ),
 			'days'      => __( 'Last %s days', 'fw' ),
 		);
+	}
+
+	/**
+	 * The same shape as data(), drawn only from the visits of one traffic
+	 * channel (table 'hmch', recorded from Visitor Insights 1.0.6 on).
+	 *
+	 * @return array
+	 */
+	private static function data_for_channel( $path, $device, $from, $to, $ch ) {
+		global $wpdb;
+
+		$page = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . FW_VI_Installer::table( 'pages' ) . ' WHERE path = %s', $path ) ); // phpcs:ignore WordPress.DB
+		$out  = array( 'path' => $path, 'device' => $device, 'from' => $from, 'to' => $to, 'ch' => $ch, 'views' => 0, 'elem' => array(), 'grid' => array(), 'scroll' => array(), 'sections' => array(), 'friction' => array(), 'moves' => array() );
+
+		if ( ! $page ) {
+			return $out;
+		}
+
+		$rows = $wpdb->get_results( $wpdb->prepare(
+			'SELECT kind, item, a, b, SUM(n) n FROM ' . FW_VI_Installer::table( 'hmch' ) . ' WHERE page_id = %d AND device = %s AND ch = %s AND day BETWEEN %s AND %s GROUP BY kind, item, a, b',
+			$page, $device, $ch, $from, $to
+		) ); // phpcs:ignore WordPress.DB
+
+		$sec = array();
+		$fk  = array( 1 => 'r', 2 => 'd', 3 => 'e' );
+
+		foreach ( $rows as $r ) {
+			$n = (int) $r->n;
+			switch ( $r->kind ) {
+				case 'v':
+					$out['views'] += $n;
+					break;
+				case 'e':
+					$out['elem'][] = array( $r->item, (int) $r->a, (int) $r->b, $n );
+					break;
+				case 'c':
+					$out['grid'][] = array( (int) $r->a, (int) $r->b, $n );
+					break;
+				case 's':
+					$out['scroll'][] = array( (int) $r->a, $n );
+					break;
+				case 'r':
+					$sec[ $r->item ][0] = ( $sec[ $r->item ][0] ?? 0 ) + $n;
+					break;
+				case 't':
+					$sec[ $r->item ][1] = ( $sec[ $r->item ][1] ?? 0 ) + $n;
+					break;
+				case 'm':
+					$out['moves'][] = array( $r->item, (int) $r->a, (int) $r->b, $n );
+					break;
+				case 'f':
+					$out['friction'][] = array( $r->item, $fk[ (int) $r->a ] ?? 'r', $n );
+					break;
+			}
+		}
+
+		foreach ( $sec as $item => $v ) {
+			$out['sections'][] = array( $item, (int) ( $v[0] ?? 0 ), (int) ( $v[1] ?? 0 ) );
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Channel labels for the viewer's channel menu ('' = all).
+	 *
+	 * @return array
+	 */
+	public static function channel_choices() {
+		return array_merge( array( '' => __( 'All channels', 'fw' ) ), FW_VI_Channels::labels() );
 	}
 
 	/**
@@ -160,10 +235,14 @@ class FW_VI_Heatmaps {
 	 *
 	 * @return array
 	 */
-	public static function data( $path, $device, $days ) {
+	public static function data( $path, $device, $days, $ch = '' ) {
 		global $wpdb;
 
 		list( $from, $to ) = FW_VI_Reports::range( $days );
+
+		if ( '' !== $ch ) {
+			return self::data_for_channel( $path, $device, $from, $to, $ch );
+		}
 
 		$page = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM ' . FW_VI_Installer::table( 'pages' ) . ' WHERE path = %s', $path ) ); // phpcs:ignore WordPress.DB
 		$out  = array(
@@ -177,6 +256,7 @@ class FW_VI_Heatmaps {
 			'scroll'   => array(),
 			'sections' => array(),
 			'friction' => array(),
+			'moves'    => array(),
 		);
 
 		if ( ! $page ) {
@@ -206,6 +286,10 @@ class FW_VI_Heatmaps {
 
 		foreach ( $wpdb->get_results( $wpdb->prepare( $sql( 'item, kind, SUM(n) n', 'friction', 'item, kind' ), $where ), ARRAY_N ) as $r ) { // phpcs:ignore WordPress.DB
 			$out['friction'][] = array( $r[0], $r[1], (int) $r[2] );
+		}
+
+		foreach ( $wpdb->get_results( $wpdb->prepare( $sql( 'item, a, b, SUM(n) n', 'moves', 'item, a, b' ), $where ), ARRAY_N ) as $r ) { // phpcs:ignore WordPress.DB
+			$out['moves'][] = array( $r[0], (int) $r[1], (int) $r[2], (int) $r[3] );
 		}
 
 		return $out;
